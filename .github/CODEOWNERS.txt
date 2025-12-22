@@ -1,0 +1,16 @@
+# StegID: protect cryptography + verification invariants
+
+# Default owners (adjust to your GitHub username(s) / team)
+* @StegVerse-Labs
+
+# Crypto + verification core (must be reviewed)
+src/identity/ @StegVerse-Labs
+specs/ @StegVerse-Labs
+
+# CI + security posture (must be reviewed)
+.github/workflows/ @StegVerse-Labs
+SECURITY.md @StegVerse-Labs
+THREAT_MODEL.md @StegVerse-Labs
+GOVERNANCE.md @StegVerse-Labs
+TIERS.md @StegVerse-Labs
+PHASES.md @StegVerse-Labs
