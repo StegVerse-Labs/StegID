@@ -1,4 +1,4 @@
-
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 
 ## Continuity receipts (StegTV/StegTVC wiring)
 - Schema: `specs/continuity-receipt.schema.json`
