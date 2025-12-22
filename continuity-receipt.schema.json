@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StegTV Continuity Receipt",
+  "type": "object",
+  "required": [
+    "version",
+    "receipt_id",
+    "account_id",
+    "sequence",
+    "issued_at",
+    "event",
+    "prev_hash",
+    "payload_hash",
+    "signing_key_id",
+    "signature_alg",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "receipt_id": {
+      "type": "string"
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "issued_at": {
+      "type": "integer",
+      "description": "Unix epoch seconds"
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "key_created",
+            "key_rotated",
+            "key_revoked",
+            "owner_presence",
+            "device_enrolled",
+            "device_removed",
+            "recovery_drill"
+          ]
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "prev_hash": {
+      "type": "string",
+      "description": "Base64url(SHA256(canonical_json(prev_receipt_core))) or 'GENESIS'"
+    },
+    "payload_hash": {
+      "type": "string",
+      "description": "Base64url(SHA256(canonical_payload))"
+    },
+    "signing_key_id": {
+      "type": "string"
+    },
+    "signature_alg": {
+      "type": "string",
+      "enum": [
+        "ed25519"
+      ]
+    },
+    "signature": {
+      "type": "string",
+      "description": "Base64url signature over receipt_core bytes"
+    }
+  },
+  "additionalProperties": false
+}
