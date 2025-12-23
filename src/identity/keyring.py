@@ -1,50 +1,36 @@
 from __future__ import annotations
 
-from typing import Dict, Optional
-import time
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 
-class _BaseKeyring:
+@dataclass
+class KeyRecord:
+    key_id: str
+    public_key_pem: str
+    created_at: int
+    expires_at: int
+    revoked: bool = False
+
+
+class KeyringStore:
     """
-    Internal base keyring implementation.
-    Stores public keys and validity windows.
+    Minimal keyring used by tests.
+    Memory-backed by default (redis_url optional for future expansion).
     """
 
     def __init__(self, redis_url: Optional[str] = None):
-        # Redis wiring may be added later; for now, in-memory
-        self._keys: Dict[str, Dict] = {}
+        self.redis_url = redis_url
+        self._mem: Dict[str, KeyRecord] = {}
 
-    def upsert_key(self, key_id: str, record: Dict) -> None:
-        self._keys[key_id] = record
+    def upsert_key(self, key_id: str, record: Dict[str, Any]) -> None:
+        self._mem[key_id] = KeyRecord(
+            key_id=record.get("key_id", key_id),
+            public_key_pem=record["public_key_pem"],
+            created_at=int(record.get("created_at", 0)),
+            expires_at=int(record.get("expires_at", 0)),
+            revoked=bool(record.get("revoked", False)),
+        )
 
-    def revoke_key(self, key_id: str) -> None:
-        if key_id in self._keys:
-            self._keys[key_id]["revoked"] = True
-
-    def get_public_key_pem_if_valid(self, key_id: str, at_epoch: int) -> Optional[str]:
-        rec = self._keys.get(key_id)
-        if not rec:
-            return None
-
-        if rec.get("revoked"):
-            return None
-
-        created = rec.get("created_at", 0)
-        expires = rec.get("expires_at")
-
-        if at_epoch < created:
-            return None
-        if expires is not None and at_epoch > expires:
-            return None
-
-        return rec.get("public_key_pem")
-
-
-# ✅ Canonical, public name used everywhere else
-class KeyringStore(_BaseKeyring):
-    """
-    Public keyring interface used by StegID verifiers, adapters, and tests.
-
-    This alias ensures stability even if the internal implementation changes.
-    """
-    pass
+    def get_key(self, key_id: str) -> Optional[KeyRecord]:
+        return self._mem.get(key_id)
