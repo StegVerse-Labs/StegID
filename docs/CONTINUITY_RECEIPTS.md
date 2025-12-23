@@ -62,7 +62,7 @@ receipt = mint_receipt(
     ed25519_private_pem=private_key_pem,
 )
 
-##Chain Verification
+## Chain Verification
 
 Receipt chains are verified for:
 	•	Contiguous sequence numbers
@@ -78,7 +78,7 @@ ok, notes = verify_chain_and_sequence(
 
 assert ok is True
 
-##Verification Entrypoint (Transport-Safe)
+## Verification Entrypoint (Transport-Safe)
 
 This is the preferred verification API for inbound payloads.
 
@@ -92,7 +92,7 @@ out = verify_receipt_payload_bytes(
 
 assert out.ok is True
 
-##Accepted Payload Shapes
+## Accepted Payload Shapes
 
 The verifier accepts any of the following JSON shapes:
 
@@ -100,7 +100,7 @@ The verifier accepts any of the following JSON shapes:
 { "receipt_chain": [ ... ] }
 { ...single receipt object... }
 
-##VerifiedReceipt Result
+## VerifiedReceipt Result
 
 verify_receipt_payload_bytes() returns a VerifiedReceipt:
 from dataclasses import dataclass
@@ -111,7 +111,7 @@ class VerifiedReceipt:
     receipt: dict
     notes: list[str]
 
-##Error Semantics
+## Error Semantics
 
 All verification failures raise VerificationError
 with a stable machine-readable code.
@@ -126,7 +126,7 @@ Signature verification failed
 sequence_invalid
 Non-contiguous receipt chain
 
-##Example
+## Example
 try:
     verify_receipt_payload_bytes(payload, keyring=kr)
 except VerificationError as e:
@@ -135,7 +135,7 @@ except VerificationError as e:
 
 ⸻
 
-StegTV Adapter
+## StegTV Adapter
 
 Adapters provide a stable interface for downstream systems.
 from identity import StegTVContinuityAdapter
@@ -149,7 +149,7 @@ out = adapter.verify_receipt_payload(
 
 assert out.ok is True
 
-Design Guarantees
+## Design Guarantees
 	•	No network access required for verification
 	•	Deterministic verification results
 	•	Explicit error codes (machine-readable)
@@ -157,7 +157,7 @@ Design Guarantees
 
 ⸻
 
-Non-Goals
+## Non-Goals
 	•	Key distribution
 	•	Key revocation transport
 	•	Receipt storage or indexing
