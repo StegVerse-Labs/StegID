@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 from identity.continuity_receipts import verify_chain_and_sequence
-from identity.keyring import Keyring
+from identity.keyring import KeyringStore
 from identity.validation import validate_timestamps
 
 
@@ -25,7 +25,7 @@ class VerifiedReceipt:
 def verify_receipt_payload_bytes(
     payload_bytes: bytes,
     *,
-    keyring: Keyring,
+    keyring: KeyringStore,
     now_epoch: Optional[int] = None,
     max_future_skew_seconds: int = 120,
     require_monotonic_timestamps: bool = True,
@@ -45,22 +45,23 @@ def verify_receipt_payload_bytes(
     except Exception as e:
         raise VerificationError("bad_payload", f"Could not decode JSON receipt payload: {e}")
 
-    # Minimal structure check
     if not isinstance(receipt, dict):
         raise VerificationError("bad_payload", "Receipt payload must be a JSON object")
 
-    # Key validity: require signature key to be present and valid in keyring at issued_at
     key_id = receipt.get("signing_key_id")
     issued_at = receipt.get("issued_at")
     if not key_id or issued_at is None:
         raise VerificationError("bad_receipt", "Missing signing_key_id or issued_at")
 
+    # Ensure the signing key is valid at issued_at
     pub = keyring.get_public_key_pem_if_valid(str(key_id), int(issued_at))
     if not pub:
-        raise VerificationError("key_invalid", f"Key not found/valid for signing_key_id={key_id} at issued_at={issued_at}")
+        raise VerificationError(
+            "key_invalid",
+            f"Key not found/valid for signing_key_id={key_id} at issued_at={issued_at}",
+        )
 
-    # Verify chain rules using StegID core verifier.
-    # Phase 1: we verify the chain integrity for the single receipt in isolation.
+    # Verify continuity rules (signature/chain/sequence handled inside core receipt logic)
     ok, notes = verify_chain_and_sequence((receipt,))
     if not ok:
         raise VerificationError("chain_invalid", "Receipt failed chain/sequence verification")
