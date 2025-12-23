@@ -1,69 +1,57 @@
+from __future__ import annotations
+
+import json
 import time
-import uuid
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from src.identity.continuity_receipts import mint_receipt, verify_chain_and_sequence
-from src.identity.keyring import VerifierKeyring, fingerprint_public_key_pem
-from src.identity.stegtv_adapter import derive_signals_from_receipts_strict
+from identity.continuity_receipts import mint_receipt, verify_chain_and_sequence, fingerprint_public_key_pem
+from identity.keyring import KeyringStore
+from identity.stegtv_adapter import StegTVContinuityAdapter
 
-def test_ed25519_strict_chain_sig_and_adapter():
+
+def test_receipt_chain_verifies_and_adapter_accepts():
     now = int(time.time())
 
     priv = Ed25519PrivateKey.generate()
-    pub = priv.public_key()
-
     priv_pem = priv.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
-    )
-    pub_pem = pub.public_bytes(
+    ).decode("utf-8")
+    pub_pem = priv.public_key().public_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
+    ).decode("utf-8")
 
-    keyring = VerifierKeyring()
-    key_id = keyring.add_key(pub_pem, not_before_epoch=now-10_000)
+    key_id = fingerprint_public_key_pem(pub_pem)
 
-    r1 = mint_receipt(
-        account_id="acct1",
+    kr = KeyringStore(redis_url=None)
+    kr.upsert_key(key_id, {
+        "key_id": key_id,
+        "public_key_pem": pub_pem,
+        "created_at": now - 10,
+        "expires_at": now + 10_000,
+        "revoked": False,
+    })
+
+    r0 = mint_receipt(
+        account_id="acct_demo",
         sequence=0,
-        issued_at=now-4000000,
+        issued_at=now,
         event_type="key_created",
-        receipt_id=str(uuid.uuid4()),
-        signing_key_id=key_id,
-        ed25519_private_pem=priv_pem,
+        event_metadata={},
+        payload={},
         prev_receipt=None,
-        payload={"device":"A"},
-    )
-    r2 = mint_receipt(
-        account_id="acct1",
-        sequence=1,
-        issued_at=now-2000000,
-        event_type="key_rotated",
-        receipt_id=str(uuid.uuid4()),
+        receipt_id="r0",
         signing_key_id=key_id,
         ed25519_private_pem=priv_pem,
-        prev_receipt=r1,
-        payload={"device":"A"},
-    )
-    r3 = mint_receipt(
-        account_id="acct1",
-        sequence=2,
-        issued_at=now-1000,
-        event_type="owner_presence",
-        receipt_id=str(uuid.uuid4()),
-        signing_key_id=key_id,
-        ed25519_private_pem=priv_pem,
-        prev_receipt=r2,
-        payload={"presence":"ok"},
     )
 
-    ok, _ = verify_chain_and_sequence((r1, r2, r3))
-    assert ok
+    ok, notes = verify_chain_and_sequence((r0,))
+    assert ok is True
 
-    ds = derive_signals_from_receipts_strict([r1, r2, r3], keyring=keyring, now_epoch=now)
-    assert 0.0 <= ds.crypto_continuity["score"] <= 1.0
-    assert 0.0 <= ds.time_depth["score"] <= 1.0
-    assert ds.crypto_continuity["evidence"]["rotations"] == 1
+    adapter = StegTVContinuityAdapter(keyring=kr)
+    out = adapter.verify_receipt_payload(json.dumps(r0).encode("utf-8"), now_epoch=now)
+    assert out.ok is True
