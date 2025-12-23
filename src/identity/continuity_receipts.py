@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from .keyring import KeyringStore
 
@@ -36,7 +39,6 @@ def fingerprint_public_key_pem(pem_str: str) -> str:
     """
     pub = serialization.load_pem_public_key(pem_str.encode("utf-8"))
     if not isinstance(pub, Ed25519PublicKey):
-        # tests are using Ed25519; keep message clear if something else arrives
         raise ValueError("Expected an Ed25519 public key PEM.")
     der = pub.public_bytes(
         encoding=serialization.Encoding.DER,
@@ -93,7 +95,9 @@ def mint_receipt(
     if not acct:
         raise TypeError("mint_receipt() missing required argument: 'account_id'")
 
-    priv = serialization.load_pem_private_key(ed25519_private_pem.encode("utf-8"), password=None)
+    priv = serialization.load_pem_private_key(
+        ed25519_private_pem.encode("utf-8"), password=None
+    )
     if not isinstance(priv, Ed25519PrivateKey):
         raise ValueError("Expected Ed25519 private key PEM.")
 
@@ -114,6 +118,58 @@ def mint_receipt(
     return receipt
 
 
+def _verify_receipt_signature(receipt: Dict[str, Any], *, keyring: KeyringStore) -> bool:
+    """
+    Verify signature + signing key is known and not revoked.
+    Raises VerificationError on failure. Returns True on success.
+    """
+    for req in (
+        "account_id",
+        "sequence",
+        "issued_at",
+        "event_type",
+        "event_metadata",
+        "payload",
+        "prev_receipt",
+        "receipt_id",
+        "signing_key_id",
+        "signature",
+    ):
+        if req not in receipt:
+            raise VerificationError(f"Missing field: {req}")
+
+    key_id = receipt["signing_key_id"]
+    rec = keyring.get_key(key_id)
+    if not rec or getattr(rec, "revoked", False):
+        raise VerificationError("Unknown or revoked signing key.")
+
+    pub = serialization.load_pem_public_key(rec.public_key_pem.encode("utf-8"))
+    if not isinstance(pub, Ed25519PublicKey):
+        raise VerificationError("Signing key is not Ed25519.")
+
+    sig = _b64u_decode(receipt["signature"])
+    body = dict(receipt)
+    body.pop("signature", None)
+
+    try:
+        pub.verify(sig, _canonical_json_bytes(body))
+    except Exception as e:
+        raise VerificationError(f"Signature verification failed: {e}") from e
+
+    return True
+
+
+def verify_receipt(
+    receipt: Dict[str, Any],
+    *,
+    keyring: KeyringStore,
+) -> bool:
+    """
+    Verify a single receipt. Returns True if valid; raises VerificationError otherwise.
+    """
+    return _verify_receipt_signature(receipt, keyring=keyring)
+
+
 def verify_chain_and_sequence(
     receipts: list[Dict[str, Any]],
     *,
@@ -122,46 +178,23 @@ def verify_chain_and_sequence(
     if not receipts:
         raise VerificationError("Empty receipt chain.")
 
-    # Basic checks: monotonically increasing sequence, link prev_receipt, valid signatures
     last_seq = None
     last_receipt = None
 
     for r in receipts:
-        for req in ("account_id", "sequence", "issued_at", "event_type", "event_metadata", "payload",
-                    "prev_receipt", "receipt_id", "signing_key_id", "signature"):
-            if req not in r:
-                raise VerificationError(f"Missing field: {req}")
+        # Verify signature first
+        _verify_receipt_signature(r, keyring=keyring)
 
         seq = int(r["sequence"])
         if last_seq is not None and seq != last_seq + 1:
             raise VerificationError("Sequence is not contiguous.")
 
         if last_receipt is None:
-            # first receipt should have prev_receipt None (or be absent, but we require it above)
             if r["prev_receipt"] is not None:
                 raise VerificationError("First receipt must have prev_receipt=None.")
         else:
             if r["prev_receipt"] != last_receipt:
                 raise VerificationError("Receipt chain linkage mismatch (prev_receipt).")
-
-        key_id = r["signing_key_id"]
-        rec = keyring.get_key(key_id)
-        if not rec or rec.revoked:
-            raise VerificationError("Unknown or revoked signing key.")
-
-        pub = serialization.load_pem_public_key(rec.public_key_pem.encode("utf-8"))
-        if not isinstance(pub, Ed25519PublicKey):
-            raise VerificationError("Signing key is not Ed25519.")
-
-        sig = _b64u_decode(r["signature"])
-
-        body = dict(r)
-        body.pop("signature", None)
-
-        try:
-            pub.verify(sig, _canonical_json_bytes(body))
-        except Exception as e:
-            raise VerificationError(f"Signature verification failed: {e}") from e
 
         last_seq = seq
         last_receipt = r
