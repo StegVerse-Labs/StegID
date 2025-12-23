@@ -6,7 +6,7 @@ import time
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
 
-from identity.keyring import Keyring
+from identity.keyring import KeyringStore
 from identity.continuity_receipts import mint_receipt, fingerprint_public_key_pem
 from identity.envelope import make_receipt_envelope
 from stegtalk_transport.handoff import handoff_to_stegid
@@ -29,7 +29,7 @@ def test_handoff_calls_stegid_verifier_success():
 
     key_id = fingerprint_public_key_pem(pub_pem)
 
-    kr = Keyring(redis_url=None)
+    kr = KeyringStore(redis_url=None)
     kr.upsert_key(key_id, {
         "key_id": key_id,
         "public_key_pem": pub_pem,
