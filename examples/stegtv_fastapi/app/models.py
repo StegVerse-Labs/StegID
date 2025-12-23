@@ -36,3 +36,11 @@ class RotateSigningKeyRequest(BaseModel):
     new_public_pem: str = Field(..., description="New Ed25519 public key in PEM format")
     not_before_epoch: int = Field(..., description="When the new key becomes valid")
     expire_previous: bool = Field(True, description="If true, set not_after_epoch on previous active key to now")
+
+from typing import Any, Dict, Optional
+from pydantic import BaseModel, Field
+
+class VerifyPayloadRequest(BaseModel):
+    envelope: Dict[str, Any] = Field(..., description="StegIDEnvelope dict")
+    payload_b64: str = Field(..., description="Base64 of raw receipt payload bytes")
+    max_future_skew_seconds: int = Field(120, ge=0, le=86400)
