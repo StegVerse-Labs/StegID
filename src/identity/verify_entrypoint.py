@@ -2,78 +2,49 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
-from identity.continuity_receipts import verify_chain_and_sequence
-from identity.keyring import KeyringStore
-from identity.validation import validate_timestamps
-
-
-@dataclass(frozen=True)
-class VerificationError(Exception):
-    code: str
-    message: str
+from .continuity_receipts import VerificationError, verify_chain_and_sequence
+from .keyring import KeyringStore
 
 
 @dataclass(frozen=True)
 class VerifiedReceipt:
     ok: bool
-    receipt: Dict[str, Any]
-    notes: Tuple[str, ...] = ()
+    account_id: str
+    last_sequence: int
+    last_receipt_id: str
 
 
 def verify_receipt_payload_bytes(
     payload_bytes: bytes,
     *,
-    keyring: KeyringStore,
-    now_epoch: Optional[int] = None,
-    max_future_skew_seconds: int = 120,
-    require_monotonic_timestamps: bool = True,
+    keyring: Optional[KeyringStore] = None,
 ) -> VerifiedReceipt:
     """
-    Transport-agnostic verifier entrypoint.
-
-    Input:
-      - payload_bytes: opaque bytes (expected JSON receipt for Phase 1)
-    Output:
-      - VerifiedReceipt (ok=True) or raises VerificationError
-
-    This function does NOT accept or require any transport metadata.
+    Entry point used by tests:
+    - payload_bytes is JSON bytes
+    - expected shape: {"receipts":[...]} or {"receipt_chain":[...]} or a raw list
     """
-    try:
-        receipt = json.loads(payload_bytes.decode("utf-8"))
-    except Exception as e:
-        raise VerificationError("bad_payload", f"Could not decode JSON receipt payload: {e}")
+    if keyring is None:
+        keyring = KeyringStore(redis_url=None)
 
-    if not isinstance(receipt, dict):
-        raise VerificationError("bad_payload", "Receipt payload must be a JSON object")
+    obj = json.loads(payload_bytes.decode("utf-8"))
 
-    key_id = receipt.get("signing_key_id")
-    issued_at = receipt.get("issued_at")
-    if not key_id or issued_at is None:
-        raise VerificationError("bad_receipt", "Missing signing_key_id or issued_at")
+    if isinstance(obj, list):
+        receipts = obj
+    elif isinstance(obj, dict):
+        receipts = obj.get("receipts") or obj.get("receipt_chain")
+        if receipts is None:
+            raise VerificationError("Expected 'receipts' or 'receipt_chain' in payload.")
+    else:
+        raise VerificationError("Invalid payload JSON.")
 
-    # Ensure the signing key is valid at issued_at
-    pub = keyring.get_public_key_pem_if_valid(str(key_id), int(issued_at))
-    if not pub:
-        raise VerificationError(
-            "key_invalid",
-            f"Key not found/valid for signing_key_id={key_id} at issued_at={issued_at}",
-        )
-
-    # Verify continuity rules (signature/chain/sequence handled inside core receipt logic)
-    ok, notes = verify_chain_and_sequence((receipt,))
-    if not ok:
-        raise VerificationError("chain_invalid", "Receipt failed chain/sequence verification")
-
-    # Timestamp sanity (verifier-side)
-    ts_ok = validate_timestamps(
-        [receipt],
-        now_epoch=now_epoch,
-        max_future_skew_seconds=max_future_skew_seconds,
-        require_monotonic=require_monotonic_timestamps,
+    ok = verify_chain_and_sequence(receipts, keyring=keyring)
+    last = receipts[-1]
+    return VerifiedReceipt(
+        ok=ok,
+        account_id=str(last["account_id"]),
+        last_sequence=int(last["sequence"]),
+        last_receipt_id=str(last["receipt_id"]),
     )
-    if not ts_ok.ok:
-        raise VerificationError("time_invalid", "; ".join(ts_ok.notes))
-
-    return VerifiedReceipt(ok=True, receipt=receipt, notes=tuple(notes))
