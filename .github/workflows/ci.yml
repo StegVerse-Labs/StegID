@@ -36,4 +36,4 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          pytest -
+          pytest -q
