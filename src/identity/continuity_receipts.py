@@ -1,151 +1,153 @@
 from __future__ import annotations
 
 import base64
-import json
 import hashlib
-from typing import Any, Dict, Optional, Tuple
+import json
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey, Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
-def b64url_encode(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
 
-def b64url_decode(s: str) -> bytes:
-    pad = "=" * ((4 - len(s) % 4) % 4)
-    return base64.urlsafe_b64decode((s + pad).encode("ascii"))
+class VerificationError(Exception):
+    pass
 
-def canonical_json(obj: Any) -> bytes:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
-def sha256_b64url(data: bytes) -> str:
-    return b64url_encode(hashlib.sha256(data).digest())
+def _b64e(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
-def receipt_core(receipt: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "version": receipt["version"],
-        "receipt_id": receipt["receipt_id"],
-        "account_id": receipt["account_id"],
-        "sequence": receipt["sequence"],
-        "issued_at": receipt["issued_at"],
-        "event": receipt["event"],
-        "prev_hash": receipt["prev_hash"],
-        "payload_hash": receipt["payload_hash"],
-        "signing_key_id": receipt["signing_key_id"],
-        "signature_alg": receipt["signature_alg"],
-    }
 
-def compute_prev_hash(prev_receipt: Optional[Dict[str, Any]]) -> str:
-    if prev_receipt is None:
-        return "GENESIS"
-    core = receipt_core(prev_receipt)
-    return sha256_b64url(canonical_json(core))
+def _b64d(s: str) -> bytes:
+    pad = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
 
-def compute_payload_hash(payload: Dict[str, Any]) -> str:
-    return sha256_b64url(canonical_json(payload))
 
-def sign_receipt_ed25519(private_key_pem: bytes, core_bytes: bytes) -> str:
-    priv = serialization.load_pem_private_key(private_key_pem, password=None)
-    sig = priv.sign(core_bytes)
-    return b64url_encode(sig)
+def _sha256_hex(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
 
-def verify_receipt_ed25519(public_key_pem: bytes, core_bytes: bytes, signature_b64url: str) -> bool:
-    pub = serialization.load_pem_public_key(public_key_pem)
-    try:
-        pub.verify(b64url_decode(signature_b64url), core_bytes)
-        return True
-    except Exception:
-        return False
+
+def fingerprint_public_key_pem(pem_str: str) -> str:
+    """
+    Stable key-id derivation for Ed25519 public keys.
+
+    Returns a deterministic key id string. This MUST NOT throw ImportError.
+    """
+    pem_bytes = pem_str.encode("utf-8") if isinstance(pem_str, str) else pem_str
+    pub = serialization.load_pem_public_key(pem_bytes)
+    if not isinstance(pub, Ed25519PublicKey):
+        raise VerificationError("Only Ed25519 public keys are supported.")
+
+    # Raw Ed25519 public key bytes (32 bytes)
+    raw = pub.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    # Namespaced id; short-but-strong (32 hex chars = 128 bits)
+    return "ed25519:" + hashlib.sha256(raw).hexdigest()[:32]
+
 
 def mint_receipt(
+    payload_bytes: bytes,
     *,
-    account_id: str,
-    sequence: int,
-    issued_at: int,
-    event_type: str,
-    event_metadata: Optional[Dict[str, Any]] = None,
-    payload: Optional[Dict[str, Any]] = None,
-    prev_receipt: Optional[Dict[str, Any]] = None,
-    receipt_id: str,
-    signing_key_id: str,
-    ed25519_private_pem: bytes,
+    private_key_pem: str,
+    public_key_pem: str,
+    ts: int,
+    seq: int,
+    prev: Optional[str],
 ) -> Dict[str, Any]:
-    """Create an Ed25519 continuity receipt with hash-chaining.
-
-    - payload is stored only as payload_hash
-    - prev_hash chains to previous receipt core
     """
-    event = {"type": event_type, "metadata": event_metadata or {}}
-    payload_obj = payload or {}
+    Create a continuity receipt for a payload.
+    """
+    payload_sha = _sha256_hex(payload_bytes)
+    key_id = fingerprint_public_key_pem(public_key_pem)
 
-    r: Dict[str, Any] = {
-        "version": "1.0",
-        "receipt_id": receipt_id,
-        "account_id": account_id,
-        "sequence": int(sequence),
-        "issued_at": int(issued_at),
-        "event": event,
-        "prev_hash": compute_prev_hash(prev_receipt),
-        "payload_hash": compute_payload_hash(payload_obj),
-        "signing_key_id": signing_key_id,
-        "signature_alg": "ed25519",
-        "signature": "",
+    body = {
+        "v": 1,
+        "ts": int(ts),
+        "seq": int(seq),
+        "prev": prev,
+        "payload_sha256": payload_sha,
+        "signer": {"kid": key_id, "pub_pem": public_key_pem},
     }
 
-    core_bytes = canonical_json(receipt_core(r))
-    r["signature"] = sign_receipt_ed25519(ed25519_private_pem, core_bytes)
-    return r
+    # Canonical bytes for signing
+    body_bytes = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
-def verify_chain_and_sequence(receipts: Tuple[Dict[str, Any], ...]) -> Tuple[bool, Tuple[str, ...]]:
-    """Verify:
-    - prev_hash chain integrity
-    - strict monotonic sequence starting at receipts[0].sequence and incrementing by 1
+    priv = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+    if not isinstance(priv, Ed25519PrivateKey):
+        raise VerificationError("Only Ed25519 private keys are supported.")
+
+    sig = priv.sign(body_bytes)
+    receipt = dict(body)
+    receipt["sig"] = _b64e(sig)
+
+    # Receipt id is hash of the signed body+sig (stable)
+    rid_material = body_bytes + b"." + sig
+    receipt["rid"] = _sha256_hex(rid_material)
+
+    return receipt
+
+
+def verify_receipt(receipt: Dict[str, Any]) -> None:
     """
-    notes = []
-    prev = None
-    expected_seq = None
-    for idx, r in enumerate(receipts):
-        # Strict sequence
-        seq = int(r.get("sequence", -1))
-        if expected_seq is None:
-            expected_seq = seq
-        if seq != expected_seq:
-            notes.append(f"Sequence violation at index {idx}: got {seq}, expected {expected_seq}.")
-            return False, tuple(notes)
-        expected_seq += 1
-
-        # Chain
-        expected_prev = compute_prev_hash(prev)
-        if r.get("prev_hash") != expected_prev:
-            notes.append(f"Chain break at index {idx}: prev_hash mismatch.")
-            return False, tuple(notes)
-
-        # Enforce alg
-        if r.get("signature_alg") != "ed25519":
-            notes.append(f"Invalid signature_alg at index {idx}: {r.get('signature_alg')}")
-            return False, tuple(notes)
-
-        prev = r
-    return True, tuple(notes)
-
-  # -------------------------------------------------------------------
-# Compatibility alias: stable name used by tests/adapters
-# -------------------------------------------------------------------
-
-def fingerprint_public_key_pem(public_key_pem: str) -> str:
+    Verify signature and internal consistency for a single receipt.
     """
-    Backwards/compat alias.
-    Preferred stable API: fingerprint_public_key_pem(pem_str) -> key_id
-    """
-    # Try common internal function names without breaking refactors
-    if "fingerprint_public_key" in globals():
-        return globals()["fingerprint_public_key"](public_key_pem)  # type: ignore
-    if "fingerprint_key_id_from_pem" in globals():
-        return globals()["fingerprint_key_id_from_pem"](public_key_pem)  # type: ignore
-    if "key_id_from_public_key_pem" in globals():
-        return globals()["key_id_from_public_key_pem"](public_key_pem)  # type: ignore
+    try:
+        sig = _b64d(receipt["sig"])
+        pub_pem = receipt["signer"]["pub_pem"]
+        kid = receipt["signer"]["kid"]
+        payload_sha = receipt["payload_sha256"]
+    except Exception as e:
+        raise VerificationError(f"Malformed receipt: {e}")
 
-    raise ImportError(
-        "No underlying fingerprint function found. "
-        "Expected one of: fingerprint_public_key, fingerprint_key_id_from_pem, key_id_from_public_key_pem."
-    )
+    # Check kid matches pub
+    expected_kid = fingerprint_public_key_pem(pub_pem)
+    if kid != expected_kid:
+        raise VerificationError("Receipt signer kid does not match signer public key.")
+
+    # Recreate body bytes (without sig, rid)
+    body = {k: receipt[k] for k in receipt.keys() if k not in ("sig", "rid")}
+    body_bytes = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+    pub = serialization.load_pem_public_key(pub_pem.encode("utf-8"))
+    if not isinstance(pub, Ed25519PublicKey):
+        raise VerificationError("Only Ed25519 public keys are supported.")
+
+    try:
+        pub.verify(sig, body_bytes)
+    except Exception:
+        raise VerificationError("Invalid signature.")
+
+    # Optional: sanity check payload hash shape
+    if not (isinstance(payload_sha, str) and len(payload_sha) == 64):
+        raise VerificationError("payload_sha256 must be a 64-char hex string.")
+
+
+def verify_chain_and_sequence(receipts: List[Dict[str, Any]]) -> None:
+    """
+    Verify:
+      - each receipt is valid
+      - seq is strictly increasing by 1
+      - prev points to prior rid
+    """
+    if not receipts:
+        raise VerificationError("No receipts provided.")
+
+    # Verify all individual receipts first
+    for r in receipts:
+        verify_receipt(r)
+
+    # Verify chain + seq
+    for i in range(1, len(receipts)):
+        prev = receipts[i - 1]
+        cur = receipts[i]
+
+        if int(cur["seq"]) != int(prev["seq"]) + 1:
+            raise VerificationError("Sequence is not strictly increasing by 1.")
+
+        if cur.get("prev") != prev.get("rid"):
+            raise VerificationError("Chain broken: prev does not match prior rid.")
