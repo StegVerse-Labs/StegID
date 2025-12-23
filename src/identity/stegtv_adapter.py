@@ -1,32 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
-from identity.keyring import KeyringStore
-from identity.verify_entrypoint import verify_receipt_payload_bytes, VerifiedReceipt
-
-
-@dataclass(frozen=True)
-class AdapterResult:
-    ok: bool
-    receipt: Optional[dict] = None
-    notes: tuple[str, ...] = ()
+from identity.continuity_receipts import VerificationError, verify_chain_and_sequence
 
 
 class StegTVContinuityAdapter:
     """
-    Thin adapter so StegTV / StegTVC components can verify StegID continuity receipts
-    without importing from a 'src.' package path (which is not importable in CI).
+    Minimal adapter: given a list of receipts, verify continuity and return status.
+    (Wiring target: StegTV/StegTVC “continuity receipts”.)
     """
 
-    def __init__(self, *, keyring: KeyringStore):
-        self._keyring = keyring
-
-    def verify_receipt_payload(self, payload_bytes: bytes, *, now_epoch: Optional[int] = None) -> AdapterResult:
-        out: VerifiedReceipt = verify_receipt_payload_bytes(
-            payload_bytes,
-            keyring=self._keyring,
-            now_epoch=now_epoch,
-        )
-        return AdapterResult(ok=out.ok, receipt=out.receipt, notes=out.notes)
+    def verify_receipts(self, receipts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            verify_chain_and_sequence(receipts)
+            return {"ok": True, "count": len(receipts)}
+        except VerificationError as e:
+            return {"ok": False, "error": str(e)}
