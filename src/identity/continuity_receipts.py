@@ -4,7 +4,7 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Iterable, Tuple, List
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -72,14 +72,13 @@ class Receipt:
     receipt_id: str
     signing_key_id: str
     signature: str  # b64url
-    body: Dict[str, Any]
 
 
 def mint_receipt(
     *,
     # Tests expect "account_id" specifically:
     account_id: Optional[str] = None,
-    # allow historical alias without breaking
+    # allow historical alias without breaking older callers:
     acct_id: Optional[str] = None,
     sequence: int,
     issued_at: int,
@@ -95,14 +94,12 @@ def mint_receipt(
     if not acct:
         raise TypeError("mint_receipt() missing required argument: 'account_id'")
 
-    priv = serialization.load_pem_private_key(
-        ed25519_private_pem.encode("utf-8"), password=None
-    )
+    priv = serialization.load_pem_private_key(ed25519_private_pem.encode("utf-8"), password=None)
     if not isinstance(priv, Ed25519PrivateKey):
         raise ValueError("Expected Ed25519 private key PEM.")
 
     body = {
-        "account_id": acct,
+        "account_id": str(acct),
         "sequence": int(sequence),
         "issued_at": int(issued_at),
         "event_type": str(event_type),
@@ -143,11 +140,16 @@ def _verify_receipt_signature(receipt: Dict[str, Any], *, keyring: KeyringStore)
     if not rec or getattr(rec, "revoked", False):
         raise VerificationError("Unknown or revoked signing key.")
 
-    pub = serialization.load_pem_public_key(rec.public_key_pem.encode("utf-8"))
+    try:
+        pub = serialization.load_pem_public_key(rec.public_key_pem.encode("utf-8"))
+    except Exception as e:
+        raise VerificationError(f"Failed to load public key PEM: {e}") from e
+
     if not isinstance(pub, Ed25519PublicKey):
         raise VerificationError("Signing key is not Ed25519.")
 
     sig = _b64u_decode(receipt["signature"])
+
     body = dict(receipt)
     body.pop("signature", None)
 
@@ -159,33 +161,40 @@ def _verify_receipt_signature(receipt: Dict[str, Any], *, keyring: KeyringStore)
     return True
 
 
-def verify_receipt(
-    receipt: Dict[str, Any],
-    *,
-    keyring: KeyringStore,
-) -> bool:
+def verify_receipt(receipt: Dict[str, Any], *, keyring: Optional[KeyringStore] = None) -> bool:
     """
-    Verify a single receipt. Returns True if valid; raises VerificationError otherwise.
+    Public wrapper (tests/imports expect this symbol).
     """
+    if keyring is None:
+        keyring = KeyringStore(redis_url=None)
     return _verify_receipt_signature(receipt, keyring=keyring)
 
 
 def verify_chain_and_sequence(
-    receipts: list[Dict[str, Any]],
+    receipts: Iterable[Dict[str, Any]],
     *,
     keyring: Optional[KeyringStore] = None,
-) -> bool:
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Tests call:
+        ok, notes = verify_chain_and_sequence((r0,))
+    so:
+      - accept tuples/lists/iterables
+      - return (bool, notes_dict)
+    """
     if keyring is None:
-        # tests may call without providing a keyring; default to empty store
         keyring = KeyringStore(redis_url=None)
-    if not receipts:
+
+    chain: List[Dict[str, Any]] = list(receipts) if receipts is not None else []
+    notes: Dict[str, Any] = {"count": len(chain), "last_sequence": None, "last_receipt_id": None}
+
+    if not chain:
         raise VerificationError("Empty receipt chain.")
 
-    last_seq = None
-    last_receipt = None
+    last_seq: Optional[int] = None
+    last_receipt: Optional[Dict[str, Any]] = None
 
-    for r in receipts:
-        # Verify signature first
+    for r in chain:
         _verify_receipt_signature(r, keyring=keyring)
 
         seq = int(r["sequence"])
@@ -193,13 +202,15 @@ def verify_chain_and_sequence(
             raise VerificationError("Sequence is not contiguous.")
 
         if last_receipt is None:
-            if r["prev_receipt"] is not None:
+            if r.get("prev_receipt") is not None:
                 raise VerificationError("First receipt must have prev_receipt=None.")
         else:
-            if r["prev_receipt"] != last_receipt:
+            if r.get("prev_receipt") != last_receipt:
                 raise VerificationError("Receipt chain linkage mismatch (prev_receipt).")
 
         last_seq = seq
         last_receipt = r
 
-    return True
+    notes["last_sequence"] = last_seq
+    notes["last_receipt_id"] = last_receipt.get("receipt_id") if last_receipt else None
+    return True, notes
