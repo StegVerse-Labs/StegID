@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import base64
+import hashlib
+
+from identity.verify_entrypoint import verify_receipt_payload_bytes, VerificationError as StegIDVerificationError
+from identity.envelope import StegIDEnvelope
+from .models import VerifyPayloadRequest
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException
