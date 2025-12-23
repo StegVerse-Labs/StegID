@@ -1,70 +1,50 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import time
-import hashlib
-import base64
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-def b64url_encode(b: bytes) -> str:
-    import base64
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode("ascii")
-
-def fingerprint_public_key_pem(public_pem: bytes) -> str:
-    """Stable fingerprint for identifying the verifying key (NOT a user identifier)."""
-    h = hashlib.sha256(public_pem).digest()
-    return b64url_encode(h[:16])  # short fingerprint (128-bit)
-
-@dataclass(frozen=True)
-class KeyRecord:
-    key_id: str
-    public_pem: bytes
-    not_before_epoch: int
-    not_after_epoch: Optional[int] = None
-    revoked: bool = False
-
-class VerifierKeyring:
-    """A minimal verification keyring for Ed25519 receipt verification.
-
-    In production, StegTV should store this in hardened storage and expose read-only verification material.
+class _BaseKeyring:
     """
-    def __init__(self) -> None:
-        self._keys: Dict[str, KeyRecord] = {}
+    Internal base keyring implementation.
+    Stores public keys and validity windows.
+    """
 
-    def add_key(self, public_pem: bytes, *, not_before_epoch: int, not_after_epoch: Optional[int] = None) -> str:
-        key_id = fingerprint_public_key_pem(public_pem)
-        self._keys[key_id] = KeyRecord(
-            key_id=key_id,
-            public_pem=public_pem,
-            not_before_epoch=int(not_before_epoch),
-            not_after_epoch=int(not_after_epoch) if not_after_epoch is not None else None,
-            revoked=False,
-        )
-        return key_id
+    def __init__(self, redis_url: Optional[str] = None):
+        # Redis wiring may be added later; for now, in-memory
+        self._keys: Dict[str, Dict] = {}
+
+    def upsert_key(self, key_id: str, record: Dict) -> None:
+        self._keys[key_id] = record
 
     def revoke_key(self, key_id: str) -> None:
         if key_id in self._keys:
-            rec = self._keys[key_id]
-            self._keys[key_id] = KeyRecord(
-                key_id=rec.key_id,
-                public_pem=rec.public_pem,
-                not_before_epoch=rec.not_before_epoch,
-                not_after_epoch=rec.not_after_epoch,
-                revoked=True,
-            )
+            self._keys[key_id]["revoked"] = True
 
-    def get_public_pem(self, key_id: str, *, at_epoch: int) -> Tuple[Optional[bytes], Tuple[str, ...]]:
-        notes = []
+    def get_public_key_pem_if_valid(self, key_id: str, at_epoch: int) -> Optional[str]:
         rec = self._keys.get(key_id)
         if not rec:
-            return None, ("Unknown signing_key_id.",)
-        if rec.revoked:
-            notes.append("Signing key is revoked.")
-        if at_epoch < rec.not_before_epoch:
-            notes.append("Receipt time is before key validity.")
-        if rec.not_after_epoch is not None and at_epoch > rec.not_after_epoch:
-            notes.append("Receipt time is after key expiry.")
-        return rec.public_pem, tuple(notes)
+            return None
+
+        if rec.get("revoked"):
+            return None
+
+        created = rec.get("created_at", 0)
+        expires = rec.get("expires_at")
+
+        if at_epoch < created:
+            return None
+        if expires is not None and at_epoch > expires:
+            return None
+
+        return rec.get("public_key_pem")
+
+
+# ✅ Canonical, public name used everywhere else
+class KeyringStore(_BaseKeyring):
+    """
+    Public keyring interface used by StegID verifiers, adapters, and tests.
+
+    This alias ensures stability even if the internal implementation changes.
+    """
+    pass
