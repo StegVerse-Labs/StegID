@@ -127,3 +127,25 @@ def verify_chain_and_sequence(receipts: Tuple[Dict[str, Any], ...]) -> Tuple[boo
 
         prev = r
     return True, tuple(notes)
+
+  # -------------------------------------------------------------------
+# Compatibility alias: stable name used by tests/adapters
+# -------------------------------------------------------------------
+
+def fingerprint_public_key_pem(public_key_pem: str) -> str:
+    """
+    Backwards/compat alias.
+    Preferred stable API: fingerprint_public_key_pem(pem_str) -> key_id
+    """
+    # Try common internal function names without breaking refactors
+    if "fingerprint_public_key" in globals():
+        return globals()["fingerprint_public_key"](public_key_pem)  # type: ignore
+    if "fingerprint_key_id_from_pem" in globals():
+        return globals()["fingerprint_key_id_from_pem"](public_key_pem)  # type: ignore
+    if "key_id_from_public_key_pem" in globals():
+        return globals()["key_id_from_public_key_pem"](public_key_pem)  # type: ignore
+
+    raise ImportError(
+        "No underlying fingerprint function found. "
+        "Expected one of: fingerprint_public_key, fingerprint_key_id_from_pem, key_id_from_public_key_pem."
+    )
