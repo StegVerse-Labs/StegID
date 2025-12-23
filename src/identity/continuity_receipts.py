@@ -4,150 +4,166 @@ import base64
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+
+from .keyring import KeyringStore
 
 
 class VerificationError(Exception):
     pass
 
 
-def _b64e(b: bytes) -> str:
+def _b64u(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
 
-def _b64d(s: str) -> bytes:
-    pad = "=" * ((4 - (len(s) % 4)) % 4)
+def _b64u_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
     return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
 
 
-def _sha256_hex(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
+def _canonical_json_bytes(obj: Any) -> bytes:
+    return json.dumps(obj, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 
 def fingerprint_public_key_pem(pem_str: str) -> str:
     """
-    Stable key-id derivation for Ed25519 public keys.
-
-    Returns a deterministic key id string. This MUST NOT throw ImportError.
+    Stable key_id from PEM public key:
+    sha256(SPKI_DER) -> hex
     """
-    pem_bytes = pem_str.encode("utf-8") if isinstance(pem_str, str) else pem_str
-    pub = serialization.load_pem_public_key(pem_bytes)
+    pub = serialization.load_pem_public_key(pem_str.encode("utf-8"))
     if not isinstance(pub, Ed25519PublicKey):
-        raise VerificationError("Only Ed25519 public keys are supported.")
-
-    # Raw Ed25519 public key bytes (32 bytes)
-    raw = pub.public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
+        # tests are using Ed25519; keep message clear if something else arrives
+        raise ValueError("Expected an Ed25519 public key PEM.")
+    der = pub.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
     )
-    # Namespaced id; short-but-strong (32 hex chars = 128 bits)
-    return "ed25519:" + hashlib.sha256(raw).hexdigest()[:32]
+    return hashlib.sha256(der).hexdigest()
+
+
+# Backwards/compat aliases some modules/tests may expect
+def fingerprint_public_key(public_key_pem: str) -> str:
+    return fingerprint_public_key_pem(public_key_pem)
+
+
+def fingerprint_key_id_from_pem(public_key_pem: str) -> str:
+    return fingerprint_public_key_pem(public_key_pem)
+
+
+def key_id_from_public_key_pem(public_key_pem: str) -> str:
+    return fingerprint_public_key_pem(public_key_pem)
+
+
+@dataclass(frozen=True)
+class Receipt:
+    account_id: str
+    sequence: int
+    issued_at: int
+    event_type: str
+    event_metadata: Dict[str, Any]
+    payload: Dict[str, Any]
+    prev_receipt: Optional[Dict[str, Any]]
+    receipt_id: str
+    signing_key_id: str
+    signature: str  # b64url
+    body: Dict[str, Any]
 
 
 def mint_receipt(
-    payload_bytes: bytes,
     *,
-    private_key_pem: str,
-    public_key_pem: str,
-    ts: int,
-    seq: int,
-    prev: Optional[str],
+    # Tests expect "account_id" specifically:
+    account_id: Optional[str] = None,
+    # allow historical alias without breaking
+    acct_id: Optional[str] = None,
+    sequence: int,
+    issued_at: int,
+    event_type: str,
+    event_metadata: Dict[str, Any],
+    payload: Dict[str, Any],
+    prev_receipt: Optional[Dict[str, Any]],
+    receipt_id: str,
+    signing_key_id: str,
+    ed25519_private_pem: str,
 ) -> Dict[str, Any]:
-    """
-    Create a continuity receipt for a payload.
-    """
-    payload_sha = _sha256_hex(payload_bytes)
-    key_id = fingerprint_public_key_pem(public_key_pem)
+    acct = account_id if account_id is not None else acct_id
+    if not acct:
+        raise TypeError("mint_receipt() missing required argument: 'account_id'")
+
+    priv = serialization.load_pem_private_key(ed25519_private_pem.encode("utf-8"), password=None)
+    if not isinstance(priv, Ed25519PrivateKey):
+        raise ValueError("Expected Ed25519 private key PEM.")
 
     body = {
-        "v": 1,
-        "ts": int(ts),
-        "seq": int(seq),
-        "prev": prev,
-        "payload_sha256": payload_sha,
-        "signer": {"kid": key_id, "pub_pem": public_key_pem},
+        "account_id": acct,
+        "sequence": int(sequence),
+        "issued_at": int(issued_at),
+        "event_type": str(event_type),
+        "event_metadata": dict(event_metadata or {}),
+        "payload": dict(payload or {}),
+        "prev_receipt": prev_receipt,
+        "receipt_id": str(receipt_id),
+        "signing_key_id": str(signing_key_id),
     }
 
-    # Canonical bytes for signing
-    body_bytes = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-    priv = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
-    if not isinstance(priv, Ed25519PrivateKey):
-        raise VerificationError("Only Ed25519 private keys are supported.")
-
-    sig = priv.sign(body_bytes)
-    receipt = dict(body)
-    receipt["sig"] = _b64e(sig)
-
-    # Receipt id is hash of the signed body+sig (stable)
-    rid_material = body_bytes + b"." + sig
-    receipt["rid"] = _sha256_hex(rid_material)
-
+    sig = priv.sign(_canonical_json_bytes(body))
+    receipt = {**body, "signature": _b64u(sig)}
     return receipt
 
 
-def verify_receipt(receipt: Dict[str, Any]) -> None:
-    """
-    Verify signature and internal consistency for a single receipt.
-    """
-    try:
-        sig = _b64d(receipt["sig"])
-        pub_pem = receipt["signer"]["pub_pem"]
-        kid = receipt["signer"]["kid"]
-        payload_sha = receipt["payload_sha256"]
-    except Exception as e:
-        raise VerificationError(f"Malformed receipt: {e}")
-
-    # Check kid matches pub
-    expected_kid = fingerprint_public_key_pem(pub_pem)
-    if kid != expected_kid:
-        raise VerificationError("Receipt signer kid does not match signer public key.")
-
-    # Recreate body bytes (without sig, rid)
-    body = {k: receipt[k] for k in receipt.keys() if k not in ("sig", "rid")}
-    body_bytes = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-    pub = serialization.load_pem_public_key(pub_pem.encode("utf-8"))
-    if not isinstance(pub, Ed25519PublicKey):
-        raise VerificationError("Only Ed25519 public keys are supported.")
-
-    try:
-        pub.verify(sig, body_bytes)
-    except Exception:
-        raise VerificationError("Invalid signature.")
-
-    # Optional: sanity check payload hash shape
-    if not (isinstance(payload_sha, str) and len(payload_sha) == 64):
-        raise VerificationError("payload_sha256 must be a 64-char hex string.")
-
-
-def verify_chain_and_sequence(receipts: List[Dict[str, Any]]) -> None:
-    """
-    Verify:
-      - each receipt is valid
-      - seq is strictly increasing by 1
-      - prev points to prior rid
-    """
+def verify_chain_and_sequence(
+    receipts: list[Dict[str, Any]],
+    *,
+    keyring: KeyringStore,
+) -> bool:
     if not receipts:
-        raise VerificationError("No receipts provided.")
+        raise VerificationError("Empty receipt chain.")
 
-    # Verify all individual receipts first
+    # Basic checks: monotonically increasing sequence, link prev_receipt, valid signatures
+    last_seq = None
+    last_receipt = None
+
     for r in receipts:
-        verify_receipt(r)
+        for req in ("account_id", "sequence", "issued_at", "event_type", "event_metadata", "payload",
+                    "prev_receipt", "receipt_id", "signing_key_id", "signature"):
+            if req not in r:
+                raise VerificationError(f"Missing field: {req}")
 
-    # Verify chain + seq
-    for i in range(1, len(receipts)):
-        prev = receipts[i - 1]
-        cur = receipts[i]
+        seq = int(r["sequence"])
+        if last_seq is not None and seq != last_seq + 1:
+            raise VerificationError("Sequence is not contiguous.")
 
-        if int(cur["seq"]) != int(prev["seq"]) + 1:
-            raise VerificationError("Sequence is not strictly increasing by 1.")
+        if last_receipt is None:
+            # first receipt should have prev_receipt None (or be absent, but we require it above)
+            if r["prev_receipt"] is not None:
+                raise VerificationError("First receipt must have prev_receipt=None.")
+        else:
+            if r["prev_receipt"] != last_receipt:
+                raise VerificationError("Receipt chain linkage mismatch (prev_receipt).")
 
-        if cur.get("prev") != prev.get("rid"):
-            raise VerificationError("Chain broken: prev does not match prior rid.")
+        key_id = r["signing_key_id"]
+        rec = keyring.get_key(key_id)
+        if not rec or rec.revoked:
+            raise VerificationError("Unknown or revoked signing key.")
+
+        pub = serialization.load_pem_public_key(rec.public_key_pem.encode("utf-8"))
+        if not isinstance(pub, Ed25519PublicKey):
+            raise VerificationError("Signing key is not Ed25519.")
+
+        sig = _b64u_decode(r["signature"])
+
+        body = dict(r)
+        body.pop("signature", None)
+
+        try:
+            pub.verify(sig, _canonical_json_bytes(body))
+        except Exception as e:
+            raise VerificationError(f"Signature verification failed: {e}") from e
+
+        last_seq = seq
+        last_receipt = r
+
+    return True
