@@ -173,8 +173,11 @@ def verify_receipt(
 def verify_chain_and_sequence(
     receipts: list[Dict[str, Any]],
     *,
-    keyring: KeyringStore,
+    keyring: Optional[KeyringStore] = None,
 ) -> bool:
+    if keyring is None:
+        # tests may call without providing a keyring; default to empty store
+        keyring = KeyringStore(redis_url=None)
     if not receipts:
         raise VerificationError("Empty receipt chain.")
 
