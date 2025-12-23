@@ -6,8 +6,8 @@ from .continuity_receipts import (
 )
 
 from .verify_entrypoint import (
-    verify_receipt_payload_bytes,
     VerifiedReceipt,
+    verify_receipt_payload_bytes,
 )
 
 from .stegtv_adapter import StegTVContinuityAdapter
@@ -17,7 +17,7 @@ __all__ = [
     "fingerprint_public_key_pem",
     "mint_receipt",
     "verify_chain_and_sequence",
-    "verify_receipt_payload_bytes",
     "VerifiedReceipt",
+    "verify_receipt_payload_bytes",
     "StegTVContinuityAdapter",
 ]
