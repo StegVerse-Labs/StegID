@@ -23,14 +23,13 @@ def verify_receipt_payload_bytes(
     keyring: Optional[KeyringStore] = None,
     now_epoch: Optional[int] = None,
 ) -> VerifiedReceipt:
-
     if keyring is None:
         keyring = KeyringStore(redis_url=None)
 
     obj = json.loads(payload_bytes.decode("utf-8"))
 
-    # Accept single receipt
-    if isinstance(obj, dict) and "signature" in obj:
+    # Accept a single receipt (even if malformed) so tests can assert key_invalid etc.
+    if isinstance(obj, dict) and "signing_key_id" in obj:
         receipts = [obj]
     elif isinstance(obj, dict):
         receipts = obj.get("receipts") or obj.get("receipt_chain")
@@ -45,5 +44,4 @@ def verify_receipt_payload_bytes(
         raise VerificationError("Invalid payload", code="payload_invalid")
 
     ok, _ = verify_chain_and_sequence(receipts, keyring=keyring)
-
     return VerifiedReceipt(ok=ok, receipt=receipts[-1])
