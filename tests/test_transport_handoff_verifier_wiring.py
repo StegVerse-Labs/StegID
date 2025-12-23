@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import time
 
-from identity.keyring import Keyring
-from identity.continuity_receipts import mint_receipt, fingerprint_public_key_pem
-from stegtalk_transport.handoff import handoff_to_stegid
-from identity.envelope import make_receipt_envelope
-from identity.verify_entrypoint import verify_receipt_payload_bytes
-
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization
+
+from identity.keyring import Keyring
+from identity.continuity_receipts import mint_receipt, fingerprint_public_key_pem
+from identity.envelope import make_receipt_envelope
+from stegtalk_transport.handoff import handoff_to_stegid
+from stegtalk_transport.stegid_verifier_adapter import make_stegid_verify_fn
 
 
 def test_handoff_calls_stegid_verifier_success():
@@ -53,8 +53,14 @@ def test_handoff_calls_stegid_verifier_success():
 
     payload_bytes = json.dumps(r).encode("utf-8")
     env = make_receipt_envelope(payload_bytes)
-    verify_fn = lambda b: verify_receipt_payload_bytes(b, keyring=kr, now_epoch=now)
 
-    out = handoff_to_stegid(envelope=env, payload_bytes=payload_bytes, steg_id_verify_fn=verify_fn)
+    verify_fn = make_stegid_verify_fn(keyring=kr)
+
+    out = handoff_to_stegid(
+        envelope=env,
+        payload_bytes=payload_bytes,
+        steg_id_verify_fn=verify_fn,
+    )
+
     assert out.ok is True
     assert out.receipt["account_id"] == "acct_demo"
