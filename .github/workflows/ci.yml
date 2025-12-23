@@ -24,15 +24,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          python -m pip install --upgrade pip setuptools wheel
+          # Install project (pyproject.toml) if present
+          pip install -e . || true
+          # Ensure runtime deps used by receipts/keys
+          pip install cryptography
+          # Ensure test runner available
           pip install pytest
 
       - name: Run tests
         env:
-          PYTHONPATH: ${{ github.workspace }}/src
+          # allow both "import identity..." and (if needed) "import src.identity..."
+          PYTHONPATH: .
         run: |
           pytest -q
