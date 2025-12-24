@@ -38,7 +38,7 @@ A receipt is a single JSON object with the following fields:
 - `signing_key_id` is derived as:
 
 ```text
-sha256(SPKI_DER(public_key)) â hex
+sha256(SPKI_DER(public_key)) --> hex
 ```
 
 - Public keys **must** exist in a `KeyringStore`
@@ -206,7 +206,7 @@ These concerns are intentionally left to higher-level systems
 
 ## Status
 
-**Stable â Public Contract (v1.0)**
+**Stable - Public Contract (v1.0)**
 
 Breaking changes require:
 
