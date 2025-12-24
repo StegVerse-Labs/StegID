@@ -10,6 +10,12 @@ from .verify_entrypoint import (
     VerifiedReceipt,
 )
 
+from .entity_identity import (
+    root_key_id_from_public_pem,
+    entity_id_from_public_pem,
+    entity_id_from_root_key_id,
+)
+
 from .keyring import KeyringStore
 
 from .stegtv_adapter import StegTVContinuityAdapter
@@ -31,3 +37,4 @@ __all__ = [
     # Adapters
     "StegTVContinuityAdapter",
 ]
+
