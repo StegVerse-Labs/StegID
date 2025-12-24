@@ -1,1 +1,61 @@
-##
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AI Entity Identity Profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entity_id",
+    "root_key_id",
+    "root_public_key_pem",
+    "entity_type"
+  ],
+  "properties": {
+    "entity_id": {
+      "type": "string",
+      "pattern": "^steg:ai:[0-9a-f]{64}$"
+    },
+    "root_key_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "root_public_key_pem": {
+      "type": "string",
+      "minLength": 32
+    },
+    "entity_type": {
+      "type": "string",
+      "enum": [
+        "ai",
+        "human",
+        "svc"
+      ]
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "runtime_fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "impl": {
+          "type": "string"
+        },
+        "impl_version": {
+          "type": "string"
+        },
+        "build_id": {
+          "type": "string"
+        },
+        "model_hint": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
