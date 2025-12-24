@@ -14,7 +14,8 @@ def main() -> int:
         return 2
 
     kr = KeyringStore(redis_url=None)
-    # Note: for real usage, you’ll load keys into kr before verifying.
+    # For real usage: load keys into `kr` before verifying.
+
     try:
         out = verify_receipt_payload_bytes(payload, keyring=kr, now_epoch=0)
         print(json.dumps({"ok": out.ok, "notes": out.notes, "receipt": out.receipt}, indent=2))
