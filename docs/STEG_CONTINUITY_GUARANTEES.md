@@ -32,29 +32,29 @@ Other repos may integrate, but are **not part of this core bundle** and MUST tre
 
 ## 3. Global Guarantees (Non-Negotiable)
 
-### G1 â Offline Verifiability
+### G1 — Offline Verifiability
 Verification MUST succeed or fail **without network access**. Any online checks are optional and non-authoritative.
 
-### G2 â Deterministic Results
+### G2 — Deterministic Results
 Given the same inputs (`payload_bytes`, `keyring`, `now_epoch`, configuration), verifiers MUST produce the same decision.
 
-### G3 â Explicit Machine-Readable Errors
+### G3 — Explicit Machine-Readable Errors
 Failures MUST raise `VerificationError` with a stable `.code` (see `CONTINUITY_RECEIPTS.md`).
 
-### G4 â Cryptographic Minimalism
+### G4 — Cryptographic Minimalism
 Receipt signatures MUST remain **Ed25519-only** for v1.x.
 
-### G5 â Contract Compatibility
+### G5 — Contract Compatibility
 New versions MUST remain backward compatible for accepted payload shapes unless a major version bump is declared.
 
 ---
 
-## 4. Identity Parity Guarantees (UX â AX)
+## 4. Identity Parity Guarantees (UX ↔ AX)
 
-### P0 â Cryptographic Parity
+### P0 — Cryptographic Parity
 All identity classes are **cryptographically equal**: Ed25519 keys, receipts, and verification rules are the same across classes.
 
-### P1 â Declared Identity Class
+### P1 — Declared Identity Class
 Each identity MUST declare an `identity_class` at genesis (or be inferable from genesis event metadata):
 
 - `human`
@@ -64,7 +64,7 @@ Each identity MUST declare an `identity_class` at genesis (or be inferable from 
 
 This value MUST be stable for the lifetime of the identity unless a governance action explicitly migrates it.
 
-### P2 â Capability Symmetry Rule
+### P2 — Capability Symmetry Rule
 Any capability available to a `human` identity MUST either:
 - be available to an `ai` identity, **or**
 - be explicitly disallowed in this document with rationale.
@@ -79,15 +79,15 @@ Any capability available to a `human` identity MUST either:
 - claiming biological markers (DNA, fingerprint, face) as primary authentication
 - bypassing guardian/quorum controls when policy requires them
 
-### P3 â Recovery Parity
+### P3 — Recovery Parity
 Recovery MUST be possible for any identity class **without backdoors**.
 
 - Humans MAY recover using devices + guardians.
 - AI MUST recover using: prior receipts + guardian attestations + deterministic rules.
 
-No âadmin overrideâ recovery path is permitted in core guarantees.
+No “admin override” recovery path is permitted in core guarantees.
 
-### P4 â Accountability Without Personhood
+### P4 — Accountability Without Personhood
 AI identities are accountable through **continuity and auditability**, not moral or legal personhood.
 
 Systems MUST be able to:
@@ -99,16 +99,16 @@ Systems MUST be able to:
 
 ## 5. Key Lifecycle Guarantees
 
-### K1 â Key Presence Requirement
+### K1 — Key Presence Requirement
 A receipt MUST be rejected if its `signing_key_id` is unknown or revoked.
 
-### K2 â Key Expiration Semantics (v1 policy)
+### K2 — Key Expiration Semantics (v1 policy)
 If `now_epoch` is provided, verifiers SHOULD reject keys where `now_epoch > expires_at`.
 If `now_epoch` is not reliable (offline), adapters MAY treat expiration as advisory.
 
 **Recommended error code:** `key_expired` (reserved for v1.1 enforcement).
 
-### K3 â Rotation Rules
+### K3 — Rotation Rules
 Key rotation MUST be represented as receipts (e.g., `event_type="key_rotated"` or equivalent).
 
 Rotation MUST NOT break continuity:
@@ -116,32 +116,32 @@ Rotation MUST NOT break continuity:
 - chain remains verifiable
 - new signing keys MUST be in keyring before acceptance
 
-### K4 â Multi-Key Overlap
+### K4 — Multi-Key Overlap
 Multiple active keys MAY exist, but verifiers SHOULD require that:
-- each receiptâs `signing_key_id` is valid at the time of verification, and
+- each receipt’s `signing_key_id` is valid at the time of verification, and
 - governance defines which event types are permitted for older keys.
 
 ---
 
 ## 6. Time Semantics & Clock Trust
 
-### T1 â `issued_at` is Advisory
+### T1 — `issued_at` is Advisory
 `issued_at` is informational unless an adapter explicitly enforces policy.
 
-### T2 â Adapter Tolerance
-Adapters SHOULD provide a configurable skew window (e.g., Â±Î seconds) for time-based checks.
+### T2 — Adapter Tolerance
+Adapters SHOULD provide a configurable skew window (e.g., ±Δ seconds) for time-based checks.
 
-### T3 â Replay Windows
+### T3 — Replay Windows
 Replay prevention SHOULD be implemented at adapter + transport layers (StegTalk/StegTV), not by changing core receipt verification.
 
 ---
 
 ## 7. Forking, Conflicts, and Linearity
 
-### F1 â Linear Chains in v1
+### F1 — Linear Chains in v1
 Receipt chains are linear. Forks are considered invalid **by default**.
 
-### F2 â Fork Resolution is Out of Scope (v1)
+### F2 — Fork Resolution is Out of Scope (v1)
 If multi-device or concurrent signing creates forks, resolution MUST be handled by higher-level governance (StegCore), not core receipt verification.
 
 This protects the primitive from becoming a consensus system prematurely.
@@ -169,7 +169,7 @@ Core guarantee: if keys remain private and verifiers have correct keyring state,
 
 ## 9. Change Control & Versioning
 
-### V1 â Contract Stability
+### V1 — Contract Stability
 `docs/CONTINUITY_RECEIPTS.md` + this document define v1.
 
 Breaking changes require:
@@ -177,7 +177,7 @@ Breaking changes require:
 - migration notes
 - contract tests updated with explicit rationale
 
-### V2 â Reserved Extensions (Non-Breaking if optional)
+### V2 — Reserved Extensions (Non-Breaking if optional)
 These fields MAY be introduced as optional:
 - `chain_hash` (bundle commitment)
 - `origin`, `domain` (replay/domain boundaries)
@@ -192,14 +192,14 @@ This Guarantees Layer does NOT define:
 - distributed key distribution
 - key escrow
 - DNA/biometrics collection workflows
-- identity âtruthâ outside continuity proofs
+- identity “truth” outside continuity proofs
 - centralized account systems
 
 Those belong in higher-level repos and policies.
 
 ---
 
-## Appendix A â Implementation Checklist (Core Bundle)
+## Appendix A — Implementation Checklist (Core Bundle)
 
 - [ ] Freeze v1 contract tests (recommended)
 - [ ] Add `key_expired` enforcement behind adapter policy (v1.1)
