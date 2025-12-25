@@ -4,7 +4,9 @@
 
 > **Status:** Stable v1 contract (exports frozen). Forward evolution is additive-only.
 
-StegID is a **continuity identity primitive**: it proves that the *same controller* has maintained control of an account over time using cryptographically chained receipts.  
+StegID is a **continuity identity primitive**: it proves that the *same controller*
+has maintained control of an account over time using cryptographically chained
+receipts.  
 It is **not** legal identity, KYC, or personhood.
 
 ---
@@ -28,10 +30,12 @@ That property is:
 
 StegID follows a strict contract-freeze policy.
 
-All **v1 public exports are permanently frozen** and will not be renamed, removed, or semantically altered.  
-Some identifiers reflect early naming decisions and are preserved indefinitely as legacy aliases.
+All **v1 public exports are permanently frozen** and will not be renamed, removed,
+or semantically altered. Some identifiers reflect early naming decisions and are
+preserved indefinitely as legacy aliases.
 
-Forward development uses **canonical naming via adapters**, ensuring long-term stability without breaking deployed systems.
+Forward development uses **canonical naming via adapters**, ensuring long-term
+stability without breaking deployed systems.
 
 📄 See: `docs/CONTRACT_STABILITY.md`
 
@@ -40,15 +44,12 @@ Forward development uses **canonical naming via adapters**, ensuring long-term s
 ## QuickStart (≈60 seconds)
 
 ```bash
-# create venv (optional but recommended)
 python -m venv .venv
 source .venv/bin/activate
 
-# install deps
-python -m pip install -r requirements.txt
+python -m pip install -U pip
 python -m pip install -e .
 
-# run tests
 pytest -q
 ```
 
@@ -61,52 +62,88 @@ If tests pass, the verifier is working correctly.
 This is intentionally small. It proves the verifier runs and enforces the contract.
 
 ```python
-from identity import KeyringStore, verify_receipt_payload_bytes
+import json
+import time
 
-# empty keyring (no trusted keys yet)
-kr = KeyringStore(redis_url=None)
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-# minimal (invalid) payload — demonstrates enforcement, not success
-payload_bytes = b'{"receipts": []}'
-
-out = verify_receipt_payload_bytes(
-    payload_bytes,
-    keyring=kr,
+from identity import (
+    KeyringStore,
+    fingerprint_public_key_pem,
+    mint_receipt,
+    verify_receipt_payload_bytes,
 )
 
-print(out.ok)       # False
-print(out.error)    # {'code': 'payload_invalid', ...}
+now = int(time.time())
+
+# Generate keypair
+priv = Ed25519PrivateKey.generate()
+priv_pem = priv.private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.PKCS8,
+    encryption_algorithm=serialization.NoEncryption(),
+).decode("utf-8")
+pub_pem = priv.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+).decode("utf-8")
+
+# Add public key to keyring
+key_id = fingerprint_public_key_pem(pub_pem)
+kr = KeyringStore(redis_url=None)
+kr.add_public_key_pem(key_id, pub_pem)
+
+# Mint a v1 receipt
+r0 = mint_receipt(
+    account_id="acct_demo",
+    sequence=0,
+    issued_at=now,
+    event_type="key_created",
+    event_metadata={},
+    payload={"example": True},
+    prev_receipt=None,
+    receipt_id="r0",
+    signing_key_id=key_id,
+    ed25519_private_pem=priv_pem,
+)
+
+# Verify inbound payload bytes
+out = verify_receipt_payload_bytes(
+    json.dumps(r0).encode("utf-8"),
+    keyring=kr,
+    now_epoch=now,
+)
+
+print(out.ok)    # True
+print(out.notes) # verification notes
 ```
 
-Even this trivial example shows:
-- JSON parsing
-- contract-shape enforcement
-- stable error codes
+What this is / is not
 
----
+StegID is:
+	•	a receipt format + offline verifier
+	•	a frozen v1 contract with enforced behavior
+	•	adapter-friendly primitives (e.g. StegTV)
 
-## Continuity Receipts (StegTV / StegTVC wiring)
+StegID is not:
+	•	an identity provider
+	•	a database
+	•	a blockchain
+	•	a governance system
+	•	a network service
 
-- Schema: `specs/continuity-receipt.schema.json`
-- Receipt primitives: `src/identity/continuity_receipts.py`
-- Adapter: `src/identity/stegtv_adapter.py`
+See:
+	•	docs/WHY_STEGID_EXISTS.md
+	•	docs/VERSION_FREEZE_v1.md
+	•	docs/CONTINUITY_RECEIPTS.md
 
-### Flow
+⸻
 
-1. StegTV mints signed continuity receipts (Ed25519).
-2. Receipts are transported over any channel (QR, BLE, file, etc.).
-3. Verifier checks:
-   - signature validity
-   - strict sequence (+1)
-   - `prev_receipt_id` linkage
-4. Downstream systems consume confidence signals.
+Security Disclosure
 
----
+For non-sensitive issues, open a GitHub issue.
 
-## Security Disclosure
+For private security disclosure, use GitHub Security Advisories.
 
-For **non-sensitive issues**, open a GitHub issue.
-
-For **private security disclosure**, use **GitHub Security Advisories** for this repository.
-
-See: `SECURITY.md`
+See: SECURITY.md
