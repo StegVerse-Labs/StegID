@@ -39,3 +39,5 @@ This project follows:
 - v1 public exports are permanently frozen
 - Legacy identifiers preserved as aliases
 - Forward evolution is additive-only via adapters
+
+  📄 See: `docs/CONTRACT_STABILITY.md`
