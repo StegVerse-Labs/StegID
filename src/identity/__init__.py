@@ -5,15 +5,14 @@ This module defines the stable import surface.
 Implementations may move internally, but symbols here must not break.
 """
 
-# Core errors
+# Core errors + receipt primitives
 from .continuity_receipts import (
     VerificationError,
-)
-
-# Core receipt API
-from .continuity_receipts import (
+    ContinuityReceipt,
+    ContinuityReceiptV1,
     fingerprint_public_key_pem,
     mint_receipt,
+    verify_receipt_chain,
     verify_chain_and_sequence,
 )
 
@@ -33,9 +32,14 @@ __all__ = [
     # Errors
     "VerificationError",
 
+    # Receipt models
+    "ContinuityReceipt",
+    "ContinuityReceiptV1",
+
     # Receipt core
     "fingerprint_public_key_pem",
     "mint_receipt",
+    "verify_receipt_chain",
     "verify_chain_and_sequence",
 
     # Verification
