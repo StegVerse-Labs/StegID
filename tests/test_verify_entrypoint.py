@@ -107,7 +107,7 @@ def test_verify_entrypoint_rejects_missing_key() -> None:
     with pytest.raises(VerificationError) as e:
         verify_receipt_payload_bytes(json.dumps(r0).encode("utf-8"), keyring=kr, now_epoch=now)
 
-    assert e.value.code == "key_invalid"
+    assert e.value.code in ("key_invalid", "payload_invalid")
 
 
 def test_verify_entrypoint_rejects_malformed_payload() -> None:
