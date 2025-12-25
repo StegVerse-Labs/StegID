@@ -6,18 +6,14 @@ from typing import Any, Dict, Optional
 
 class KeyringStore:
     """
-    Canonical keyring storage (v1).
-
-    v1 reality: call sites/tests may use incompatible patterns.
-    We keep a stable minimal surface AND accept legacy shapes.
+    Canonical keyring storage (v1) with compatibility shims.
 
     Supported:
       - add_public_key_pem(key_id, public_key_pem)
       - get_public_key_pem(key_id)
       - revoke_key(key_id)
       - upsert_key(key_id, record_dict)
-      - upsert_key(key_id=..., public_key_pem=..., revoked=False, created_at=..., expires_at=...)
-      - upsert_key(key_id=..., public_pem=..., revoked=False, ...)
+      - upsert_key(key_id=..., public_key_pem=... OR public_pem=..., revoked=False, ...)
     """
 
     def __init__(self, redis_url: Optional[str] = None):
@@ -48,29 +44,30 @@ class KeyringStore:
 
         Accepts:
           - upsert_key(key_id, record_dict)
-          - upsert_key(key_id=..., public_key_pem=..., revoked=False, ...)
-          - upsert_key(key_id=..., public_pem=..., revoked=False, ...)
+          - upsert_key(key_id=..., public_key_pem=..., ...)
+          - upsert_key(key_id=..., public_pem=..., ...)   # IMPORTANT: tests use this
         """
+        # Pattern: upsert_key(key_id, record_dict)
         if len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], dict):
             key_id = args[0]
             record = dict(args[1])
             record.setdefault("key_id", key_id)
             record.setdefault("revoked", False)
-            # normalize common field name
+            # normalize field alias
             if "public_pem" in record and "public_key_pem" not in record:
                 record["public_key_pem"] = record["public_pem"]
             self._keys[key_id] = record
             return
 
         key_id = kwargs.get("key_id")
-        public_key_pem = kwargs.get("public_key_pem") or kwargs.get("public_pem")
-        revoked = bool(kwargs.get("revoked", False))
-
         if not isinstance(key_id, str) or not key_id:
             raise TypeError("upsert_key requires key_id")
 
+        public_key_pem = kwargs.get("public_key_pem") or kwargs.get("public_pem")
         if not isinstance(public_key_pem, str) or not public_key_pem:
-            raise TypeError("upsert_key requires public_key_pem (or public_pem)")
+            raise TypeError("upsert_key requires public_key_pem/public_pem")
+
+        revoked = bool(kwargs.get("revoked", False))
 
         rec = dict(kwargs)
         rec["key_id"] = key_id
