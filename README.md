@@ -1,5 +1,15 @@
 [![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 
+## Contract Stability
+
+StegID follows a strict contract-freeze policy.
+
+All v1 public exports are permanently frozen and will not be renamed, removed, or semantically altered. Some identifiers reflect early naming decisions and are preserved indefinitely as legacy aliases.
+
+Forward development uses canonical naming via compatibility adapters, ensuring long-term stability without breaking deployed systems.
+
+📄 See: [CONTRACT_STABILITY.md](docs/CONTRACT_STABILITY.md)
+
 ## Continuity receipts (StegTV/StegTVC wiring)
 - Schema: `specs/continuity-receipt.schema.json`
 - Receipt helpers: `src/identity/continuity_receipts.py`
