@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
-from .keyring import KeyringStore
-from .verify_entrypoint import VerifiedReceipt, verify_receipt_payload_bytes
+from .continuity_receipts import ContinuityReceipt, mint_receipt
 
 
 @dataclass
 class StegTVContinuityAdapter:
     """
-    Adapter wrapper for StegTV and similar downstream systems.
-
-    Provides a stable method name and return type while using StegID's
-    transport-safe verification entrypoint internally.
+    Thin adapter between StegTV and StegID continuity.
     """
-    keyring: KeyringStore
 
-    def verify_receipt_payload(self, payload_bytes: bytes, *, now_epoch: int) -> VerifiedReceipt:
-        return verify_receipt_payload_bytes(payload_bytes, keyring=self.keyring, now_epoch=now_epoch)
+    signing_key_id: str
+
+    def mint(self, *, payload: Any, now_epoch: int) -> ContinuityReceipt:
+        return mint_receipt(
+            payload=payload,
+            signing_key_id=self.signing_key_id,
+            now_epoch=now_epoch,
+        )
