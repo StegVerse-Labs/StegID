@@ -1,7 +1,5 @@
 [![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
 
-> **Status:** Stable v1 contract (exports frozen). Forward evolution is additive-only.
-
 # StegID
 
 > **Status:** Stable v1 contract (exports frozen). Forward evolution is additive-only.
