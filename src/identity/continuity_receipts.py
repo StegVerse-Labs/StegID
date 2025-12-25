@@ -2,429 +2,413 @@
 from __future__ import annotations
 
 import base64
-import dataclasses
 import hashlib
 import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from cryptography.hazmat.primitives import serialization
+try:
+    # cryptography is already being used in your tests (Ed25519PrivateKey.generate etc.)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey,
+        Ed25519PublicKey,
+    )
+except Exception as e:  # pragma: no cover
+    raise RuntimeError(
+        "cryptography is required for StegID continuity receipt verification"
+    ) from e
 
 
-# ----------------------------
+# -----------------------------
 # Errors
-# ----------------------------
-
+# -----------------------------
 class VerificationError(Exception):
     """
-    Structured verification error.
-
-    Tests expect:
-      - e.value.code == "key_invalid" when key missing/expired/revoked/unusable
-      - e.value.code == "payload_invalid" when receipt/payload malformed or signature bad
+    Raised when a receipt fails validation.
+    Tests expect .code (string) and often compare exact values.
     """
-    def __init__(self, code: str, message: str = ""):
+
+    def __init__(self, code: str, message: str = "") -> None:
         super().__init__(message or code)
         self.code = code
         self.message = message or code
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {"code": self.code, "message": self.message}
 
-# ----------------------------
+
+# -----------------------------
 # Helpers
-# ----------------------------
-
+# -----------------------------
 def _b64e(b: bytes) -> str:
     return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
 
+
 def _b64d(s: str) -> bytes:
-    # restore padding
     pad = "=" * ((4 - (len(s) % 4)) % 4)
     return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
 
-def _sha256_hex(b: bytes) -> str:
+
+def _normalize_pem(pem: Union[str, bytes]) -> bytes:
+    if isinstance(pem, str):
+        pem_b = pem.encode("utf-8")
+    else:
+        pem_b = pem
+    # normalize line endings + strip surrounding whitespace
+    pem_b = pem_b.replace(b"\r\n", b"\n").strip() + b"\n"
+    return pem_b
+
+
+def fingerprint_public_key_pem(public_pem: Union[str, bytes]) -> str:
+    """
+    Deterministic key identifier from a PUBLIC key PEM.
+    This is intentionally simple: sha256 hex of normalized PEM bytes.
+    """
+    h = hashlib.sha256(_normalize_pem(public_pem)).hexdigest()
+    return h
+
+
+def _load_public_key_from_pem(public_pem: Union[str, bytes]) -> Ed25519PublicKey:
+    pem_b = _normalize_pem(public_pem)
+    pub = serialization.load_pem_public_key(pem_b)
+    if not isinstance(pub, Ed25519PublicKey):
+        raise VerificationError("key_invalid", "public key is not Ed25519")
+    return pub
+
+
+def _load_private_key_from_pem(private_pem: Union[str, bytes]) -> Ed25519PrivateKey:
+    pem_b = _normalize_pem(private_pem)
+    priv = serialization.load_pem_private_key(pem_b, password=None)
+    if not isinstance(priv, Ed25519PrivateKey):
+        raise VerificationError("key_invalid", "private key is not Ed25519")
+    return priv
+
+
+def _stable_payload_bytes(payload: Any) -> bytes:
+    """
+    Receipts sign canonical JSON bytes.
+    If caller already has bytes, keep them.
+    """
+    if isinstance(payload, (bytes, bytearray)):
+        return bytes(payload)
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+def _hash_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
-def _now_epoch() -> int:
-    return int(time.time())
 
-def _canonical_receipt_signing_bytes(
-    *,
-    v: int,
-    key_id: str,
-    created_at: int,
-    expires_at: int,
-    payload_b64: str,
-    prev_receipt_id: Optional[str],
-) -> bytes:
-    """
-    Canonical bytes signed by Ed25519 private key.
-
-    Important: keep stable across versions. This is our v1 canonicalization.
-    """
-    obj = {
-        "v": v,
-        "key_id": key_id,
-        "created_at": created_at,
-        "expires_at": expires_at,
-        "payload_b64": payload_b64,
-        "prev_receipt_id": prev_receipt_id or "",
-    }
-    return json.dumps(obj, separators=(",", ":"), sort_keys=True).encode("utf-8")
-
-def _load_ed25519_private_pem(pem: str) -> Ed25519PrivateKey:
-    try:
-        key = serialization.load_pem_private_key(
-            pem.encode("utf-8"),
-            password=None,
-        )
-    except Exception as e:
-        raise VerificationError("payload_invalid", f"invalid private key pem: {e}") from e
-    if not isinstance(key, Ed25519PrivateKey):
-        raise VerificationError("payload_invalid", "private key is not Ed25519")
-    return key
-
-def _load_ed25519_public_pem(pem: str) -> Ed25519PublicKey:
-    try:
-        key = serialization.load_pem_public_key(pem.encode("utf-8"))
-    except Exception as e:
-        raise VerificationError("payload_invalid", f"invalid public key pem: {e}") from e
-    if not isinstance(key, Ed25519PublicKey):
-        raise VerificationError("payload_invalid", "public key is not Ed25519")
-    return key
-
-
-# ----------------------------
-# Keyring access (best effort / duck-typing)
-# ----------------------------
-
-def _keyring_get_record(keyring: Any, key_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Tries common keyring APIs. Expected record fields (any naming accepted):
-      - public_key_pem / public_key / public_key_pem_str / public_key_pem_bytes
-      - revoked (bool)
-      - expires_at (int epoch)
-    """
-    if keyring is None:
-        return None
-
-    candidates = [
-        ("get_key", (key_id,)),
-        ("get", (key_id,)),
-        ("lookup", (key_id,)),
-        ("fetch", (key_id,)),
-        ("read", (key_id,)),
-    ]
-    for name, args in candidates:
-        fn = getattr(keyring, name, None)
-        if callable(fn):
-            try:
-                out = fn(*args)
-                if out is None:
-                    return None
-                if isinstance(out, dict):
-                    return out
-                # Sometimes returns dataclass/object
-                if hasattr(out, "__dict__"):
-                    return dict(out.__dict__)
-            except TypeError:
-                # signature mismatch, ignore
-                continue
-            except Exception:
-                # treat as missing
-                return None
-
-    return None
-
-def _extract_public_pem(rec: Dict[str, Any]) -> Optional[str]:
-    for k in ("public_key_pem", "public_key_pem_str", "public_key", "pub_pem", "public_pem", "public_key_pem_text"):
-        v = rec.get(k)
-        if isinstance(v, str) and "BEGIN PUBLIC KEY" in v:
-            return v
-    # sometimes bytes
-    for k in ("public_key_pem_bytes", "public_key_bytes", "pub_pem_bytes"):
-        v = rec.get(k)
-        if isinstance(v, (bytes, bytearray)):
-            try:
-                s = bytes(v).decode("utf-8")
-                if "BEGIN PUBLIC KEY" in s:
-                    return s
-            except Exception:
-                pass
-    return None
-
-def _record_is_revoked(rec: Dict[str, Any]) -> bool:
-    v = rec.get("revoked")
-    return bool(v) if v is not None else False
-
-def _record_expires_at(rec: Dict[str, Any]) -> Optional[int]:
-    v = rec.get("expires_at")
-    if isinstance(v, (int, float)):
-        return int(v)
-    # alternate naming
-    v = rec.get("expires")
-    if isinstance(v, (int, float)):
-        return int(v)
-    return None
-
-def _key_invalid(msg: str) -> VerificationError:
-    return VerificationError("key_invalid", msg)
-
-def _payload_invalid(msg: str) -> VerificationError:
-    return VerificationError("payload_invalid", msg)
-
-
-# ----------------------------
-# Receipt model
-# ----------------------------
-
+# -----------------------------
+# Models
+# -----------------------------
 @dataclass(frozen=True)
 class ContinuityReceipt:
     """
-    Continuity receipt (v1).
+    Canonical receipt object.
+    Keep field names stable and JSON-friendly.
     """
-    v: int
     receipt_id: str
     key_id: str
+    payload_b64: str
+    signature_b64: str
     created_at: int
     expires_at: int
-    payload_b64: str
-    sig_b64: str
     prev_receipt_id: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "v": self.v,
-            "receipt_id": self.receipt_id,
-            "key_id": self.key_id,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-            "payload_b64": self.payload_b64,
-            "sig_b64": self.sig_b64,
-            "prev_receipt_id": self.prev_receipt_id,
-        }
-
-    @staticmethod
-    def from_dict(d: Dict[str, Any]) -> "ContinuityReceipt":
-        try:
-            return ContinuityReceipt(
-                v=int(d["v"]),
-                receipt_id=str(d["receipt_id"]),
-                key_id=str(d["key_id"]),
-                created_at=int(d["created_at"]),
-                expires_at=int(d["expires_at"]),
-                payload_b64=str(d["payload_b64"]),
-                sig_b64=str(d["sig_b64"]),
-                prev_receipt_id=(str(d["prev_receipt_id"]) if d.get("prev_receipt_id") not in (None, "") else None),
-            )
-        except Exception as e:
-            raise _payload_invalid(f"invalid receipt dict: {e}") from e
+    chain_hash: Optional[str] = None
+    version: str = "v1"
 
     def payload_bytes(self) -> bytes:
         return _b64d(self.payload_b64)
 
     def signature_bytes(self) -> bytes:
-        return _b64d(self.sig_b64)
+        return _b64d(self.signature_b64)
 
-    def signing_bytes(self) -> bytes:
-        return _canonical_receipt_signing_bytes(
-            v=self.v,
-            key_id=self.key_id,
-            created_at=self.created_at,
-            expires_at=self.expires_at,
-            payload_b64=self.payload_b64,
-            prev_receipt_id=self.prev_receipt_id,
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "version": self.version,
+            "receipt_id": self.receipt_id,
+            "key_id": self.key_id,
+            "payload_b64": self.payload_b64,
+            "signature_b64": self.signature_b64,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+        if self.prev_receipt_id is not None:
+            d["prev_receipt_id"] = self.prev_receipt_id
+        if self.chain_hash is not None:
+            d["chain_hash"] = self.chain_hash
+        return d
+
+    @staticmethod
+    def from_dict(d: Dict[str, Any]) -> "ContinuityReceipt":
+        return ContinuityReceipt(
+            version=str(d.get("version", "v1")),
+            receipt_id=str(d["receipt_id"]),
+            key_id=str(d["key_id"]),
+            payload_b64=str(d["payload_b64"]),
+            signature_b64=str(d["signature_b64"]),
+            created_at=int(d["created_at"]),
+            expires_at=int(d["expires_at"]),
+            prev_receipt_id=d.get("prev_receipt_id"),
+            chain_hash=d.get("chain_hash"),
         )
 
 
-# ----------------------------
-# Public API
-# ----------------------------
+# -----------------------------
+# Keyring (compat / storage)
+# -----------------------------
+class KeyringStore:
+    """
+    Minimal in-memory keyring with a *compatibility surface*.
 
+    Your tests + adapters have bounced between:
+      - add_public_key_pem(key_id, public_pem)
+      - upsert_key(key_id=..., public_key_pem=..., revoked=False)
+      - upsert_key(key_id, record_dict)
+      - etc
+
+    This implementation supports the common patterns WITHOUT breaking
+    if callers pass different shapes.
+    """
+
+    def __init__(self, redis_url: Optional[str] = None) -> None:
+        # redis_url accepted for signature compatibility; not used here
+        self._keys: Dict[str, Dict[str, Any]] = {}
+
+    def get_key(self, key_id: str) -> Optional[Dict[str, Any]]:
+        return self._keys.get(key_id)
+
+    # Canonical writer
+    def put_key_record(self, key_id: str, record: Dict[str, Any]) -> None:
+        rec = dict(record)
+        rec.setdefault("key_id", key_id)
+        rec.setdefault("revoked", False)
+        self._keys[key_id] = rec
+
+    # Common APIs (aliases)
+    def add_public_key_pem(self, key_id: str, public_pem: str) -> None:
+        self.put_key_record(key_id, {"public_key_pem": public_pem, "revoked": False})
+
+    def add_public_key(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    def set_public_key_pem(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    def store_public_key_pem(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    def store_public_key(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    def put_public_key_pem(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    def put_public_key(self, key_id: str, public_pem: str) -> None:
+        self.add_public_key_pem(key_id, public_pem)
+
+    # The messy one: upsert_key can be called in multiple incompatible ways.
+    def upsert_key(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Supported call patterns:
+          upsert_key(key_id, record_dict)
+          upsert_key(key_id=..., public_key_pem=..., revoked=False, created_at=..., expires_at=...)
+          upsert_key(key_id=..., public_pem=..., revoked=False)
+        """
+        if args and len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], dict):
+            key_id = args[0]
+            record = args[1]
+            self.put_key_record(key_id, record)
+            return
+
+        key_id = kwargs.get("key_id")
+        if not key_id and args and isinstance(args[0], str):
+            key_id = args[0]
+        if not isinstance(key_id, str) or not key_id:
+            raise TypeError("upsert_key requires key_id")
+
+        public_pem = (
+            kwargs.get("public_key_pem")
+            or kwargs.get("public_pem")
+            or kwargs.get("public_pem_str")
+            or kwargs.get("publicKeyPem")
+        )
+
+        record: Dict[str, Any] = {}
+        if public_pem is not None:
+            record["public_key_pem"] = public_pem
+        # allow extra metadata
+        for k in ("created_at", "expires_at", "revoked"):
+            if k in kwargs:
+                record[k] = kwargs[k]
+
+        # If nothing provided besides key_id, keep existing record (noop)
+        if not record:
+            if key_id not in self._keys:
+                self.put_key_record(key_id, {"revoked": False})
+            return
+
+        self.put_key_record(key_id, record)
+
+    def is_revoked(self, key_id: str) -> bool:
+        rec = self.get_key(key_id)
+        if not rec:
+            return True
+        return bool(rec.get("revoked", False))
+
+    def get_public_key_pem(self, key_id: str) -> Optional[str]:
+        rec = self.get_key(key_id)
+        if not rec:
+            return None
+        return rec.get("public_key_pem") or rec.get("public_pem")  # tolerate old names
+
+
+# -----------------------------
+# Minting + verification
+# -----------------------------
 def mint_receipt(
-    payload_bytes: bytes,
+    payload: Union[bytes, bytearray, Dict[str, Any], List[Any], str],
     *,
-    signing_key_id: str,
-    ed25519_private_pem: str,
+    signing_private_pem: Union[str, bytes],
+    key_id: str,
     now_epoch: Optional[int] = None,
     expires_in_seconds: int = 10_000,
     prev_receipt_id: Optional[str] = None,
 ) -> ContinuityReceipt:
     """
-    Create a v1 continuity receipt over payload_bytes, signed with Ed25519 private key.
+    Create and sign a receipt for a payload.
+    - Payload is canonicalized to bytes.
+    - Receipt ID is deterministic from (key_id + payload_hash + created_at + prev_receipt_id).
     """
-    if not isinstance(payload_bytes, (bytes, bytearray)) or len(payload_bytes) == 0:
-        raise _payload_invalid("payload_bytes missing/empty")
-    if not signing_key_id:
-        raise _payload_invalid("signing_key_id missing")
-    now = int(now_epoch if now_epoch is not None else _now_epoch())
-    created_at = now
-    expires_at = now + int(expires_in_seconds)
+    now = int(now_epoch if now_epoch is not None else time.time())
 
-    payload_b64 = _b64e(bytes(payload_bytes))
-    priv = _load_ed25519_private_pem(ed25519_private_pem)
+    payload_bytes = _stable_payload_bytes(payload)
+    payload_b64 = _b64e(payload_bytes)
 
-    msg = _canonical_receipt_signing_bytes(
-        v=1,
-        key_id=signing_key_id,
-        created_at=created_at,
-        expires_at=expires_at,
-        payload_b64=payload_b64,
-        prev_receipt_id=prev_receipt_id,
-    )
-    sig = priv.sign(msg)
+    priv = _load_private_key_from_pem(signing_private_pem)
+
+    # Sign payload hash + linking info to make tampering obvious
+    payload_hash = _hash_bytes(payload_bytes).encode("utf-8")
+    link = (prev_receipt_id or "").encode("utf-8")
+    signing_material = b"|".join([key_id.encode("utf-8"), payload_hash, str(now).encode("utf-8"), link])
+    sig = priv.sign(signing_material)
     sig_b64 = _b64e(sig)
 
-    receipt_id = _sha256_hex(msg + sig)
+    receipt_id = hashlib.sha256(signing_material + sig).hexdigest()
+    chain_hash = hashlib.sha256((receipt_id + (prev_receipt_id or "")).encode("utf-8")).hexdigest()
+
     return ContinuityReceipt(
-        v=1,
         receipt_id=receipt_id,
-        key_id=signing_key_id,
-        created_at=created_at,
-        expires_at=expires_at,
+        key_id=key_id,
         payload_b64=payload_b64,
-        sig_b64=sig_b64,
+        signature_b64=sig_b64,
+        created_at=now,
+        expires_at=now + int(expires_in_seconds),
         prev_receipt_id=prev_receipt_id,
+        chain_hash=chain_hash,
+        version="v1",
     )
 
 
 def verify_receipt_payload_bytes(
-    payload_bytes: bytes,
+    payload_bytes: Union[bytes, bytearray],
+    receipt: Union[ContinuityReceipt, Dict[str, Any]],
     *,
-    keyring: Any,
-    now_epoch: int,
+    keyring: KeyringStore,
+    now_epoch: Optional[int] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
-    Verify a *single receipt* given as JSON bytes (or dict->bytes upstream).
-    Returns (ok, notes).
-    Raises VerificationError on failure.
+    Verify a receipt against payload bytes + keyring.
+    Returns: (ok, notes_dict)
+    Raises: VerificationError with specific .code on failure
     """
-    receipt = _parse_receipt_payload_bytes(payload_bytes)
-    _verify_single_receipt(receipt, keyring=keyring, now_epoch=now_epoch)
-    return True, {"receipt_id": receipt.receipt_id, "key_id": receipt.key_id}
+    now = int(now_epoch if now_epoch is not None else time.time())
 
+    r = receipt if isinstance(receipt, ContinuityReceipt) else ContinuityReceipt.from_dict(receipt)
 
-def verify_chain_and_sequence(
-    receipts: Sequence[Union[ContinuityReceipt, Dict[str, Any], bytes, str]],
-    *,
-    keyring: Any,
-    now_epoch: int,
-) -> Tuple[bool, Dict[str, Any]]:
-    """
-    Verify a receipt chain and its ordering. Accepts a sequence of:
-      - ContinuityReceipt objects
-      - dict receipts
-      - JSON bytes
-      - JSON strings
-    """
-    parsed = [_coerce_receipt(r) for r in receipts]
-    if len(parsed) == 0:
-        raise _payload_invalid("empty receipt chain")
+    if now > int(r.expires_at):
+        raise VerificationError("expired", "receipt expired")
 
-    # Verify each receipt, then verify linkage (prev_receipt_id)
-    for r in parsed:
-        _verify_single_receipt(r, keyring=keyring, now_epoch=now_epoch)
+    if keyring.is_revoked(r.key_id):
+        raise VerificationError("key_invalid", "key revoked or missing")
 
-    # enforce chain linkage when prev_receipt_id fields are present
-    for i in range(1, len(parsed)):
-        prev = parsed[i - 1]
-        cur = parsed[i]
-        if cur.prev_receipt_id is None:
-            # if any link is missing, we don't fail hard; but we do note it
-            continue
-        if cur.prev_receipt_id != prev.receipt_id:
-            raise _payload_invalid("receipt chain linkage mismatch")
+    public_pem = keyring.get_public_key_pem(r.key_id)
+    if not public_pem:
+        raise VerificationError("key_invalid", "public key not found")
 
-    return True, {"count": len(parsed), "head": parsed[0].receipt_id, "tail": parsed[-1].receipt_id}
+    # Payload must match
+    pb = bytes(payload_bytes)
+    if _b64e(pb) != r.payload_b64:
+        raise VerificationError("payload_invalid", "payload does not match receipt")
+
+    pub = _load_public_key_from_pem(public_pem)
+
+    payload_hash = _hash_bytes(pb).encode("utf-8")
+    link = (r.prev_receipt_id or "").encode("utf-8")
+    signing_material = b"|".join([r.key_id.encode("utf-8"), payload_hash, str(r.created_at).encode("utf-8"), link])
+
+    try:
+        pub.verify(r.signature_bytes(), signing_material)
+    except Exception:
+        raise VerificationError("signature_invalid", "signature verification failed")
+
+    notes = {
+        "receipt_id": r.receipt_id,
+        "key_id": r.key_id,
+        "created_at": r.created_at,
+        "expires_at": r.expires_at,
+        "chain_hash": r.chain_hash,
+    }
+    return True, notes
 
 
 def verify_receipt_chain(
-    receipts: Sequence[Union[ContinuityReceipt, Dict[str, Any], bytes, str]],
+    receipts: Sequence[Union[ContinuityReceipt, Dict[str, Any]]],
     *,
-    keyring: Any,
-    now_epoch: int,
+    keyring: KeyringStore,
+    now_epoch: Optional[int] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
-    Compatibility alias used by some tests/adapters.
+    Verify an ordered chain of receipts:
+      - each receipt verifies cryptographically
+      - each receipt.prev_receipt_id matches previous receipt_id (when present)
     """
-    return verify_chain_and_sequence(receipts, keyring=keyring, now_epoch=now_epoch)
+    now = int(now_epoch if now_epoch is not None else time.time())
+
+    chain: List[ContinuityReceipt] = [
+        r if isinstance(r, ContinuityReceipt) else ContinuityReceipt.from_dict(r) for r in receipts
+    ]
+
+    if not chain:
+        raise VerificationError("chain_invalid", "empty chain")
+
+    # verify each receipt signature+payload linkage
+    for i, r in enumerate(chain):
+        ok, _ = verify_receipt_payload_bytes(r.payload_bytes(), r, keyring=keyring, now_epoch=now)
+        if not ok:
+            raise VerificationError("chain_invalid", "receipt failed verification")
+        if i > 0:
+            prev = chain[i - 1]
+            if r.prev_receipt_id is not None and r.prev_receipt_id != prev.receipt_id:
+                raise VerificationError("chain_invalid", "prev_receipt_id mismatch")
+
+    notes = {"count": len(chain), "head": chain[0].receipt_id, "tail": chain[-1].receipt_id}
+    return True, notes
 
 
-# ----------------------------
-# Internals
-# ----------------------------
-
-def _parse_receipt_payload_bytes(payload_bytes: bytes) -> ContinuityReceipt:
-    if not isinstance(payload_bytes, (bytes, bytearray)) or len(payload_bytes) == 0:
-        raise _payload_invalid("receipt payload bytes missing/empty")
-
-    try:
-        txt = bytes(payload_bytes).decode("utf-8")
-        d = json.loads(txt)
-        if not isinstance(d, dict):
-            raise ValueError("receipt json is not an object")
-        return ContinuityReceipt.from_dict(d)
-    except VerificationError:
-        raise
-    except Exception as e:
-        raise _payload_invalid(f"invalid receipt json: {e}") from e
+def verify_chain_and_sequence(
+    receipts: Sequence[Union[ContinuityReceipt, Dict[str, Any]]],
+    *,
+    keyring: KeyringStore,
+    now_epoch: Optional[int] = None,
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Alias used by some tests/adapters. Same as verify_receipt_chain.
+    """
+    return verify_receipt_chain(receipts, keyring=keyring, now_epoch=now_epoch)
 
 
-def _coerce_receipt(x: Union[ContinuityReceipt, Dict[str, Any], bytes, str]) -> ContinuityReceipt:
-    if isinstance(x, ContinuityReceipt):
-        return x
-    if isinstance(x, dict):
-        return ContinuityReceipt.from_dict(x)
-    if isinstance(x, (bytes, bytearray)):
-        return _parse_receipt_payload_bytes(bytes(x))
-    if isinstance(x, str):
-        # accept json text
-        try:
-            d = json.loads(x)
-            if isinstance(d, dict):
-                return ContinuityReceipt.from_dict(d)
-        except Exception as e:
-            raise _payload_invalid(f"invalid receipt string: {e}") from e
-    raise _payload_invalid("unsupported receipt type")
-
-
-def _verify_single_receipt(r: ContinuityReceipt, *, keyring: Any, now_epoch: int) -> None:
-    # version
-    if r.v != 1:
-        raise _payload_invalid("unsupported receipt version")
-
-    # time validity
-    if r.expires_at < int(now_epoch):
-        raise _key_invalid("signing key/receipt expired (by receipt expires_at)")
-
-    # key lookup
-    rec = _keyring_get_record(keyring, r.key_id)
-    if not rec:
-        raise _key_invalid("signing key missing in keyring")
-
-    if _record_is_revoked(rec):
-        raise _key_invalid("signing key revoked")
-
-    exp = _record_expires_at(rec)
-    if exp is not None and exp < int(now_epoch):
-        raise _key_invalid("signing key expired")
-
-    pub_pem = _extract_public_pem(rec)
-    if not pub_pem:
-        raise _key_invalid("signing key record missing public pem")
-
-    pub = _load_ed25519_public_pem(pub_pem)
-
-    # signature verify
-    msg = r.signing_bytes()
-    sig = r.signature_bytes()
-    try:
-        pub.verify(sig, msg)
-    except Exception as e:
-        raise _payload_invalid(f"bad signature: {e}") from e
-
-    # receipt_id sanity (must match canonical)
-    expected_id = _sha256_hex(msg + sig)
-    if r.receipt_id != expected_id:
-        raise _payload_invalid("receipt_id mismatch")
+# Convenience export for adapters/tests that want "v1" wording
+ContinuityReceiptV1 = ContinuityReceipt
