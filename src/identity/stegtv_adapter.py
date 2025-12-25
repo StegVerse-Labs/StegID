@@ -1,142 +1,97 @@
+# src/identity/stegtv_adapter.py
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Union
 
-from .continuity_receipts import (
-    ContinuityReceipt,
-    VerificationError,
-    verify_receipt_chain,
-    mint_receipt,
-)
+from .continuity_receipts import VerificationError, verify_chain_and_sequence
 from .keyring import KeyringStore
+from .verify_entrypoint import VerifiedReceipt, verify_receipt_payload_bytes
 
-
-ReceiptInput = Union[
-    ContinuityReceipt,
-    Dict[str, Any],
-]
+ReceiptDict = Dict[str, Any]
+ReceiptInput = Union[ReceiptDict, Iterable[ReceiptDict]]
 
 
 @dataclass
 class StegTVContinuityAdapter:
     """
-    Adapter layer expected by tests.
+    StegTV ↔ StegID adapter (v1).
 
-    Responsibilities:
-    - Normalize receipt shapes
-    - Enforce key presence
-    - Mint continuity receipts
-    - Delegate verification to continuity_receipts
+    Purpose:
+      - normalize receipt inputs
+      - enforce verification using StegID’s v1 contract verifier
+      - return a stable, downstream-friendly result
     """
 
     keyring: KeyringStore
     now_epoch: Optional[int] = None
 
-    # -------------------------
-    # Public entrypoint
-    # -------------------------
-
-    def verify(
-        self,
-        receipts: Union[ReceiptInput, Iterable[ReceiptInput]],
-        *,
-        require_key: bool = True,
-    ) -> List[ContinuityReceipt]:
-        """
-        Accepts:
-        - single receipt object
-        - dict receipt
-        - iterable of either
-
-        Returns:
-        - list of verified ContinuityReceipt
-        """
-
-        now = self._now()
-
-        normalized = self._normalize_receipts(receipts)
-
-        if require_key:
-            self._require_keys(normalized, now)
-
-        verified = verify_receipt_chain(
-            normalized,
-            keyring=self.keyring,
-            now_epoch=now,
-        )
-
-        return verified
-
-    # -------------------------
-    # Helpers
-    # -------------------------
-
     def _now(self) -> int:
-        return self.now_epoch if self.now_epoch is not None else int(time.time())
+        return int(self.now_epoch if self.now_epoch is not None else time.time())
 
-    def _normalize_receipts(
-        self,
-        receipts: Union[ReceiptInput, Iterable[ReceiptInput]],
-    ) -> List[ContinuityReceipt]:
+    def _normalize_receipts(self, receipts: ReceiptInput) -> List[ReceiptDict]:
+        if isinstance(receipts, dict):
+            return [receipts]
 
-        if isinstance(receipts, (dict, ContinuityReceipt)):
-            receipts = [receipts]
-
-        out: List[ContinuityReceipt] = []
-
+        out: List[ReceiptDict] = []
         for r in receipts:
-            if isinstance(r, ContinuityReceipt):
-                out.append(r)
-            elif isinstance(r, dict):
-                out.append(ContinuityReceipt(**r))
-            else:
-                raise VerificationError(
-                    f"Unsupported receipt type: {type(r)}"
-                )
-
+            if not isinstance(r, dict):
+                raise VerificationError("payload_invalid", f"receipt must be an object, got {type(r)}")
+            out.append(r)
+        if not out:
+            raise VerificationError("payload_invalid", "empty receipt list")
         return out
 
-    def _require_keys(
+    def verify_receipts(
         self,
-        receipts: List[ContinuityReceipt],
-        now: int,
-    ) -> None:
-        """
-        Enforces presence of keys required by receipts.
-        """
-
-        for r in receipts:
-            key_id = r.signing_key_id
-            if not key_id:
-                raise VerificationError("Missing signing key")
-
-            if not self.keyring.has_key(key_id, now_epoch=now):
-                raise VerificationError(f"Unknown or expired key: {key_id}")
-
-    # -------------------------
-    # Mint passthrough
-    # -------------------------
-
-    def mint(
-        self,
+        receipts: ReceiptInput,
         *,
-        payload: bytes,
-        signing_key_id: str,
-        signer_private_pem: str,
-        expires_in: int = 3600,
-    ) -> ContinuityReceipt:
+        strict: bool = True,
+    ) -> VerifiedReceipt:
         """
-        Tests expect adapter.mint(...) to exist and work.
+        Verify one receipt or a receipt chain (already reconstructed by StegTV/transport).
+
+        Returns VerifiedReceipt:
+          - ok
+          - receipt (the first receipt)
+          - notes (verification notes list)
+          - error (if failed)
         """
+        _ = strict  # v1 core is already strict; keep flag for forward compatibility
 
-        now = self._now()
+        chain = self._normalize_receipts(receipts)
+        primary = chain[0]
 
-        return mint_receipt(
-            payload=payload,
-            signing_key_id=signing_key_id,
-            signer_private_pem=signer_private_pem,
-            now_epoch=now,
-            expires_at=now + expires_in,
+        try:
+            ok, notes = verify_chain_and_sequence(tuple(chain), keyring=self.keyring)
+            return VerifiedReceipt(ok=bool(ok), receipt=primary, notes=notes, error=None)
+        except VerificationError as e:
+            return VerifiedReceipt(ok=False, receipt=primary, notes=[], error=e.to_dict())
+
+    def verify_receipt_payload(
+        self,
+        payload_bytes: Union[bytes, bytearray],
+        *,
+        now_epoch: Optional[int] = None,
+    ) -> VerifiedReceipt:
+        """
+        Convenience: verify a JSON payload shaped as:
+          - single receipt object
+          - {"receipts":[...]}
+          - {"receipt_chain":[...]}
+        """
+        now = int(now_epoch if now_epoch is not None else self._now())
+        return verify_receipt_payload_bytes(payload_bytes, keyring=self.keyring, now_epoch=now)
+
+    def export_verified_summary_json(self, receipts: ReceiptInput) -> str:
+        """
+        Optional helper: produce a small JSON blob that downstream systems can store/log.
+        """
+        out = self.verify_receipts(receipts)
+        return json.dumps(
+            {"ok": out.ok, "error": out.error, "receipt_id": out.receipt.get("receipt_id"), "notes": out.notes},
+            separators=(",", ":"),
+            sort_keys=True,
         )
