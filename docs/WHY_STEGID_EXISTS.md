@@ -54,20 +54,6 @@ It is intentionally boring — and intentionally durable.
 
 ---
 
-## Why This Matters
-
-If identity, governance, or AI systems cannot survive:
-- infrastructure collapse
-- platform loss
-- institutional failure
-- time discontinuity
-
-Then they are conveniences, not foundations.
-
-StegID is designed to survive being forgotten — and rediscovered.
-
----
-
 ## In One Sentence
 
 StegID is a continuity-of-truth layer that can be recovered from a single artifact, on a single device, without authority.

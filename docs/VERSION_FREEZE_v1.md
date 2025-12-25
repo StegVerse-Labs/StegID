@@ -14,7 +14,6 @@ The following are considered **normative and non-breaking** in StegID v1.0:
 - Verification semantics
 - Error codes and failure modes
 - Governance separation (truth vs authority)
-- Recovery guarantees (RCC ≥ RC-2)
 - Crypto agility rules (additive evolution only)
 
 These define **what must be true**, not how it is implemented.
@@ -29,7 +28,6 @@ The following may evolve without breaking v1.0 compatibility:
 - Performance optimizations
 - Language bindings
 - Adapters (StegTV, StegTalk, etc.)
-- New cryptographic algorithms (via crypto agility rules)
 
 ---
 
@@ -39,26 +37,12 @@ Any future version claiming StegID compatibility MUST:
 
 - Accept and verify v1.0 continuity receipts
 - Preserve deterministic verification
-- Preserve recovery guarantees defined by the charter
 - Preserve truth/authority separation
 
 Breaking changes require:
 - explicit version bump
 - migration documentation
-- governance acknowledgment
-
----
-
-## Why Freeze Now
-
-StegID v1.0 is frozen because:
-
-- its contracts are minimal and complete
-- its guarantees are explicitly defined
-- its recovery model is future-resilient
-- its authority boundaries are non-negotiable
-
-Further evolution is expected — **but not ambiguity**.
+- contract tests updated with explicit rationale
 
 ---
 
@@ -67,4 +51,4 @@ Further evolution is expected — **but not ambiguity**.
 StegID v1.0 is declared **Foundational**.
 
 The system may grow.
-The truth must remain portable.
+The contract must remain portable.

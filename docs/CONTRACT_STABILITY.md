@@ -2,23 +2,33 @@
 
 StegID is a contract-first repo. The v1 surface is intentionally small and frozen.
 
-## Source of Truth for v1
+Normative v1 docs:
 
-Normative v1 documents:
+- `docs/CONTINUITY_RECEIPTS.md`
+- `docs/VERSION_FREEZE_v1.md`
+- `docs/WHY_STEGID_EXISTS.md`
 
-- `docs/CONTINUITY_RECEIPTS.md` (receipt shape + verification semantics)
-- `docs/VERSION_FREEZE_v1.md` (freeze declaration)
-- `docs/WHY_STEGID_EXISTS.md` (scope + non-goals)
+---
 
-## Compatibility Rules
+## Key ID Derivation (v1.x)
 
-- v1 is additive-only: new optional fields MAY be introduced without breaking v1.
-- Breaking changes require a major version bump (v2+) plus migration notes.
+In StegID v1.x, `signing_key_id` / `key_id` is derived from the **normalized PUBLIC key PEM bytes**:
 
-## Crypto Agility
+```text
+sha256(normalized_public_key_pem_bytes) -> hex
+```
 
-Crypto agility planning lives in:
+This choice is intentionally conservative:
+- it matches the v1 implementation
+- it avoids breaking any already-minted receipts
 
-- `docs/CRYPTO_AGILITY.md`
+A future major version may adopt SPKI DER hashing as a migration, but v1.x remains stable.
 
-Note: v1 verification currently enforces Ed25519 and the single-signature field `signature_b64`. Any multi-signature envelope is a planned additive extension and must not break v1 parsing.
+---
+
+## Change Control
+
+Breaking changes require:
+- a major version bump (v2+)
+- migration notes
+- updated contract tests

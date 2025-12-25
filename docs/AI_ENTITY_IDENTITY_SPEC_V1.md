@@ -27,14 +27,16 @@ An **Entity** is any actor that can sign and be verified:
 Each AI Entity has a **Root Key**:
 
 - `root_key_alg`: MUST be `Ed25519` for v1
-- `root_key_id`: `sha256(SPKI_DER(root_public_key)) -> hex`
+- `root_key_id`: `sha256(normalized_public_key_pem_bytes) -> hex`
 - Root keys are long-lived; rotations are explicit events.
+
+**Note (v1 choice):** In StegID v1.x, key IDs are derived from **normalized PEM bytes** (line-ending normalized, trimmed, with a trailing newline). This matches the implementation and avoids breaking any existing minted receipts.
 
 ### 1.3 Continuity Ledger (AI “Memory”)
 Identity over time is established via **Continuity Receipts** (see `docs/CONTINUITY_RECEIPTS.md`):
 
 - monotonic `sequence`
-- `prev_receipt` linkage
+- `prev_receipt_id` linkage (when present)
 - signature verification
 - key validity checks
 
@@ -47,7 +49,7 @@ AI identity is the **chain**, not a single record.
 ### 2.1 Entity ID Format
 `entity_id` is a stable string derived from the root key:
 
-```
+```text
 entity_id = "steg:ai:" + root_key_id
 ```
 
@@ -107,8 +109,8 @@ An implementation claiming compliance with v1 MUST:
 
 1. Verify receipt signatures (Ed25519)
 2. Enforce chain continuity:
-   - contiguous `sequence`
-   - correct `prev_receipt` linkage
+   - contiguous `sequence` (+1 for multi-receipt v1 chains)
+   - correct `prev_receipt_id` linkage (when present)
 3. Enforce key validity:
    - signing key present in KeyringStore
    - not revoked
@@ -118,18 +120,18 @@ An implementation claiming compliance with v1 MUST:
    - `payload_invalid`
    - `key_invalid`
    - `signature_invalid`
-   - `sequence_invalid`
+   - `chain_invalid`
 
 ---
 
 ## Appendix A: Derivation Functions
 
-### A.1 Root Key ID
-```
-root_key_id = sha256(SPKI_DER(root_public_key)) -> hex
+### A.1 Root Key ID (v1.x)
+```text
+root_key_id = sha256(normalized_public_key_pem_bytes) -> hex
 ```
 
 ### A.2 Entity ID
-```
+```text
 entity_id = "steg:ai:" + root_key_id
 ```
