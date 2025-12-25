@@ -9,8 +9,6 @@ has maintained control of an account over time using cryptographically chained
 receipts.  
 It is **not** legal identity, KYC, or personhood.
 
----
-
 ## Why StegID exists (30 seconds)
 
 Most systems can prove *who* you are only by relying on centralized authorities.
@@ -19,14 +17,13 @@ StegID instead proves **continuity of control**:
 > “This same key-holder has consistently controlled this identifier over time.”
 
 That property is:
+
 - offline-verifiable
 - transport-agnostic
 - resilient to infrastructure loss
 - useful for recovery, governance, and trust bootstrapping
 
----
-
-## Contract Stability
+## Contract stability
 
 StegID follows a strict contract-freeze policy.
 
@@ -37,9 +34,7 @@ preserved indefinitely as legacy aliases.
 Forward development uses **canonical naming via adapters**, ensuring long-term
 stability without breaking deployed systems.
 
-📄 See: `docs/CONTRACT_STABILITY.md`
-
----
+See: `docs/CONTRACT_STABILITY.md`
 
 ## QuickStart (≈60 seconds)
 
@@ -55,11 +50,10 @@ pytest -q
 
 If tests pass, the verifier is working correctly.
 
----
+## Minimal verification example (success)
 
-## Minimal Verification Example
-
-This is intentionally small. It proves the verifier runs and enforces the contract.
+This example generates an Ed25519 keypair, mints a valid v1 receipt, and verifies it
+using the transport-safe entrypoint.
 
 ```python
 import json
@@ -116,34 +110,52 @@ out = verify_receipt_payload_bytes(
 )
 
 print(out.ok)    # True
-print(out.notes) # verification notes
+print(out.notes) # verification notes (list of dicts)
 ```
 
-What this is / is not
+## Minimal verification example (failure)
 
-StegID is:
-	•	a receipt format + offline verifier
-	•	a frozen v1 contract with enforced behavior
-	•	adapter-friendly primitives (e.g. StegTV)
+This shows contract enforcement and stable error codes.
 
-StegID is not:
-	•	an identity provider
-	•	a database
-	•	a blockchain
-	•	a governance system
-	•	a network service
+```python
+from identity import KeyringStore, verify_receipt_payload_bytes
+
+kr = KeyringStore(redis_url=None)
+
+payload_bytes = b'{"receipts": []}'  # invalid: empty list
+
+out = verify_receipt_payload_bytes(payload_bytes, keyring=kr)
+
+print(out.ok)     # False
+print(out.error)  # {'code': 'payload_invalid', ...}
+```
+
+## What this is / is not
+
+**StegID is:**
+
+- a receipt format + offline verifier
+- a frozen v1 contract with enforced behavior (tests)
+- adapter-friendly primitives (e.g. StegTV)
+
+**StegID is not:**
+
+- an identity provider
+- a database
+- a blockchain
+- a governance system
+- a network service
 
 See:
-	•	docs/WHY_STEGID_EXISTS.md
-	•	docs/VERSION_FREEZE_v1.md
-	•	docs/CONTINUITY_RECEIPTS.md
 
-⸻
+- `docs/WHY_STEGID_EXISTS.md`
+- `docs/VERSION_FREEZE_v1.md`
+- `docs/CONTINUITY_RECEIPTS.md`
 
-Security Disclosure
+## Security disclosure
 
-For non-sensitive issues, open a GitHub issue.
+For **non-sensitive issues**, open a GitHub issue.
 
-For private security disclosure, use GitHub Security Advisories.
+For **private security disclosure**, use **GitHub Security Advisories**.
 
-See: SECURITY.md
+See: `SECURITY.md`

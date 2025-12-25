@@ -3,37 +3,34 @@
 All notable changes to this project will be documented in this file.
 
 This project follows:
+
 - **Semantic Versioning**: https://semver.org/
 - **Keep a Changelog** format: https://keepachangelog.com/en/1.1.0/
 
----
-
-## v1.0.1 - 2025-12-25
+## [Unreleased]
 
 ### Added
-- README: QuickStart section with install + test instructions.
-- README: Minimal **successful** verification example demonstrating end-to-end mint → verify.
-- Documentation links clarifying contract stability and frozen v1 guarantees.
+- None
 
 ### Changed
-- Docs: clarified v1 key-ID derivation as  
-  `sha256(normalized public key PEM bytes)` to match implementation.
-- Docs: aligned receipt field names (`signature_b64`, `prev_receipt_id`) with the v1 contract.
-- Docs: clarified crypto-agility as **planned additive evolution** (v1.1+), not a breaking change.
+- None
 
 ### Fixed
-- Docs: `VerifiedReceipt` structure and error-code descriptions now match implementation and tests.
+- None
 
-### Contract Stability
-- **No contract changes.**
-- v1 public exports remain frozen.
-- Legacy identifiers preserved as aliases.
+## [1.0.1] - 2025-12-25
 
-📄 See: `docs/CONTRACT_STABILITY.md`
+### Added
+- README: QuickStart section and minimal verification examples (success + failure) for a 60-second run path.
 
----
+### Changed
+- Docs: Aligned receipt field names and verifier output documentation to the v1 contract (`signature_b64`, `prev_receipt_id`, `notes: List[Dict[str, Any]]`).
+- Docs: Clarified v1 key-id derivation as `sha256(normalized PUBLIC key PEM bytes) -> hex` to match implementation and avoid breaking already-minted receipts.
 
-## v1.0.0 - 2025-12-25
+### Fixed
+- Documentation and markdown consistency fixes (headings, lists, code fences) to prevent rendering/copy-paste errors.
+
+## [1.0.0] - 2025-12-25
 
 ### Added
 - Initial public release of StegID v1.
@@ -42,10 +39,17 @@ This project follows:
 - Canonical verification entrypoint with stable error codes.
 - Keyring storage with backward-compatible shims.
 - StegTV adapter for receipt normalization and verification.
-- Contract-freeze guarantees for all v1 public exports.
+- Contract stability guarantees (v1 exports frozen).
 
 ### Security
 - Offline-verifiable receipt chains.
 - Deterministic signing core.
 - Explicit rejection of malformed payloads.
 - Explicit key-missing and key-revoked handling.
+
+### Contract stability
+- v1 public exports are permanently frozen.
+- Legacy identifiers preserved as aliases.
+- Forward evolution is additive-only via adapters.
+
+See: `docs/CONTRACT_STABILITY.md`
