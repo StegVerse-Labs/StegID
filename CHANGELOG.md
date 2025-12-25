@@ -18,16 +18,24 @@ This project follows:
 - None
 
 
-## v1.0.0 - 2025-12-24
+## v1.0.0 - 2025-12-25
 
 ### Added
 - Initial public release of StegID v1
-- Continuity receipts: minting + verification
-- Keyring storage abstraction
-- Transport-safe verification entrypoint
-- StegTV continuity adapter
-- Governance-facing guarantees documentation
+- Ed25519-only continuity receipt contract
+- Strict sequence and `prev_receipt_id` chain verification
+- Canonical verification entrypoint with stable error codes
+- Keyring storage with backward-compatible shims
+- StegTV adapter for receipt normalization and verification
+- Contract stability guarantees (v1 exports frozen)
+
+### Security
+- Offline-verifiable receipt chains
+- Deterministic signing core
+- Explicit rejection of malformed payloads
+- Explicit key-missing and key-revoked handling
 
 ### Contract Stability
-- **v1 public exports are permanently frozen; canonical naming is applied forward-only via adapters.**  
-  See: `docs/CONTRACT_STABILITY.md`
+- v1 public exports are permanently frozen
+- Legacy identifiers preserved as aliases
+- Forward evolution is additive-only via adapters
