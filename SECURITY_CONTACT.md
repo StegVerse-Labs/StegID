@@ -1,6 +1,6 @@
 # Security Contact
 
-For security reports, open an issue titled:
-`SECURITY: <short description>`
+Preferred: **GitHub Security Advisories** (private disclosure).
 
-If you need private disclosure, use GitHub Security Advisories for this repo when enabled.
+Fallback (public): open an issue titled:
+`SECURITY: <short description>`
