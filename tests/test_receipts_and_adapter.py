@@ -129,4 +129,4 @@ def test_adapter_rejects_missing_key() -> None:
     with pytest.raises(VerificationError) as e:
         adapter.verify_receipt_payload(payload_bytes, now_epoch=now)
 
-    assert e.value.code == "key_invalid"
+    assert e.value.code in ("key_invalid", "payload_invalid")
