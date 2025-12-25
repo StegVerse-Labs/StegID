@@ -19,10 +19,9 @@ class StegTVContinuityAdapter:
     """
     StegTV ↔ StegID adapter (v1).
 
-    Purpose:
-      - normalize receipt inputs
-      - enforce verification using StegID’s v1 contract verifier
-      - return a stable, downstream-friendly result
+    STRICT DEFAULT:
+      - strict=True: raises VerificationError (so tests can use pytest.raises)
+      - strict=False: returns VerifiedReceipt(ok=False, error=...)
     """
 
     keyring: KeyringStore
@@ -50,20 +49,15 @@ class StegTVContinuityAdapter:
         *,
         strict: bool = True,
     ) -> VerifiedReceipt:
-        """
-        Verify one receipt or a receipt chain (already reconstructed by StegTV/transport).
-
-        Returns VerifiedReceipt:
-          - ok
-          - receipt (the first receipt)
-          - notes (verification notes list)
-          - error (if failed)
-        """
-        _ = strict  # v1 core is already strict; keep flag for forward compatibility
-
         chain = self._normalize_receipts(receipts)
         primary = chain[0]
 
+        if strict:
+            # IMPORTANT: do not swallow contract errors in strict mode.
+            ok, notes = verify_chain_and_sequence(tuple(chain), keyring=self.keyring)
+            return VerifiedReceipt(ok=bool(ok), receipt=primary, notes=notes, error=None)
+
+        # Non-strict: wrap failures into VerifiedReceipt
         try:
             ok, notes = verify_chain_and_sequence(tuple(chain), keyring=self.keyring)
             return VerifiedReceipt(ok=bool(ok), receipt=primary, notes=notes, error=None)
@@ -79,21 +73,25 @@ class StegTVContinuityAdapter:
         payload_bytes: Union[bytes, bytearray],
         *,
         now_epoch: Optional[int] = None,
+        strict: bool = True,
     ) -> VerifiedReceipt:
         """
-        Convenience: verify a JSON payload shaped as:
+        Verifies JSON payload shaped as:
           - single receipt object
           - {"receipts":[...]}
           - {"receipt_chain":[...]}
         """
         now = int(now_epoch if now_epoch is not None else self._now())
-        return verify_receipt_payload_bytes(payload_bytes, keyring=self.keyring, now_epoch=now)
+        return verify_receipt_payload_bytes(
+            payload_bytes,
+            keyring=self.keyring,
+            now_epoch=now,
+            strict=strict,
+        )
 
     def export_verified_summary_json(self, receipts: ReceiptInput) -> str:
-        """
-        Optional helper: produce a small JSON blob that downstream systems can store/log.
-        """
-        out = self.verify_receipts(receipts)
+        # Prefer non-strict for summary export (never throws)
+        out = self.verify_receipts(receipts, strict=False)
         return json.dumps(
             {
                 "ok": out.ok,
