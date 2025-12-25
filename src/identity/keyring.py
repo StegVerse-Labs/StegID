@@ -1,43 +1,50 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
-
-
-@dataclass
-class KeyRecord:
-    key_id: str
-    public_key_pem: str
-    created_at: int
-    expires_at: int
-    revoked: bool = False
-
-
-# Shared process-wide memory so tests that omit passing keyring still work.
-_GLOBAL_MEM: Dict[str, KeyRecord] = {}
+from typing import Optional, Dict
 
 
 class KeyringStore:
     """
-    Minimal keyring used by tests.
-    Memory-backed by default (redis_url optional for future expansion).
+    Canonical keyring storage.
 
-    IMPORTANT:
-    This store is shared across instances (process-wide) so a key inserted in one
-    KeyringStore instance is visible to other instances created later.
+    This class intentionally exposes a minimal, strict API.
+    Adapters MAY wrap it, but tests depend on deterministic behavior.
     """
 
     def __init__(self, redis_url: Optional[str] = None):
-        self.redis_url = redis_url
+        self._keys: Dict[str, Dict[str, str]] = {}
 
-    def upsert_key(self, key_id: str, record: Dict[str, Any]) -> None:
-        _GLOBAL_MEM[key_id] = KeyRecord(
-            key_id=record.get("key_id", key_id),
-            public_key_pem=record["public_key_pem"],
-            created_at=int(record.get("created_at", 0)),
-            expires_at=int(record.get("expires_at", 0)),
-            revoked=bool(record.get("revoked", False)),
-        )
+    # ------------------------------------------------------------------
+    # Canonical API (DO NOT CHANGE SIGNATURE WITHOUT VERSION BUMP)
+    # ------------------------------------------------------------------
 
-    def get_key(self, key_id: str) -> Optional[KeyRecord]:
-        return _GLOBAL_MEM.get(key_id)
+    def add_public_key_pem(self, key_id: str, public_key_pem: str) -> None:
+        """
+        Store a public key PEM by key_id.
+        """
+        self._keys[key_id] = {
+            "public_key_pem": public_key_pem,
+            "revoked": False,
+        }
+
+    def revoke_key(self, key_id: str) -> None:
+        if key_id not in self._keys:
+            raise KeyError(f"Unknown key_id: {key_id}")
+        self._keys[key_id]["revoked"] = True
+
+    def get_public_key_pem(self, key_id: str) -> Optional[str]:
+        entry = self._keys.get(key_id)
+        if not entry or entry.get("revoked"):
+            return None
+        return entry.get("public_key_pem")
+
+    # ------------------------------------------------------------------
+    # Backward-compat shim (STRICT)
+    # ------------------------------------------------------------------
+
+    def upsert_key(self, *, key_id: str, public_key_pem: str, revoked: bool = False) -> None:
+        """
+        Explicit compatibility shim.
+        """
+        self._keys[key_id] = {
+            "public_key_pem": public_key_pem,
+            "revoked": bool(revoked),
+        }
