@@ -1,5 +1,14 @@
 # Security Policy — StegID
 
+## Responsible disclosure
+
+Preferred: **GitHub Security Advisories** (private disclosure).
+
+If Security Advisories are not enabled yet, enable them in the repo settings (steps below), or open a public issue titled:
+- `SECURITY: <short description>`
+
+Please avoid publishing exploit details until a fix or mitigation is available.
+
 ## What StegID is
 StegID is a continuity system: it helps prove that “the same controller” has maintained control of an account over time via cryptographically chained receipts.
 
@@ -25,13 +34,6 @@ If a signing key is suspected compromised:
 - Rotate to a new keypair
 - Mark the old key as expired or revoked in the keyring
 - Require a recovery drill / guardian review for high-tier actions
-
-## Vulnerability reporting
-If you find a security issue, open a GitHub Issue titled:
-- `SECURITY: <short description>`
-and include:
-- impact, reproduction steps, and suggested mitigation
-Do not publish exploit details until a fix is available.
 
 ## Safe defaults
 - Ed25519-only signatures
