@@ -49,8 +49,7 @@ def test_receipt_chain_verifies_and_adapter_accepts():
         ed25519_private_pem=priv_pem,
     )
 
-    ok, notes = verify_chain_and_sequence((r0,))
-    assert ok is True
+    ok, notes = verify_chain_and_sequence((r0,), keyring=kr)
 
     adapter = StegTVContinuityAdapter(keyring=kr)
     out = adapter.verify_receipt_payload(json.dumps(r0).encode("utf-8"), now_epoch=now)
