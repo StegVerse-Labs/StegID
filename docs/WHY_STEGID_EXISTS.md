@@ -1,42 +1,73 @@
 # Why StegID Exists
 
-Most systems that claim “identity” quietly mix four separate concerns:
+Most identity systems assume:
+- continuous networks
+- trusted institutions
+- stable platforms
+- permanent infrastructure
 
-1) What happened?
-2) Can it be proven?
-3) Who is allowed to act on it?
-4) Where is it stored and indexed?
+History suggests none of those assumptions hold forever.
 
-This blending creates brittle systems, weak auditability, and portable-truth problems.
+StegID exists to answer a simpler question:
 
-## StegID’s claim is intentionally small
+> “What happened — and can it still be proven if everything else is gone?”
 
-StegID produces and verifies **Continuity Receipts**:
-cryptographically verifiable event history for an account or entity.
+---
 
-- It does not store receipts.
-- It does not distribute keys.
-- It does not decide policy.
+## What StegID Is
 
-## The point
+StegID is a minimal system for producing **verifiable continuity records**:
+- cryptographically signed
+- deterministic to verify
+- portable across platforms
+- recoverable without networks
 
-StegID answers:
+It does not decide what should happen next.
+It proves what already happened.
 
-> “What happened, and can it be proven offline?”
+---
 
-Governance answers:
+## What StegID Is Not
 
-> “Given verified facts, what should happen next?”
+StegID is not:
+- an identity provider
+- a database
+- a blockchain
+- a governance system
+- a UI or service
 
-By separating “truth” from “authority”, StegVerse components can scale without becoming a monolith.
+Those can be rebuilt.
+Truth cannot.
 
-## Why it matters now
+---
 
-Humans and AI agents increasingly need:
+## Design Principles
 
-- deterministic audit trails
-- portable verification
-- clear error semantics
-- low-dependency primitives
+StegID is built on a few non-negotiable principles:
 
-StegID is meant to be that primitive.
+- **Truth before authority**
+- **Verification without trust**
+- **Recovery without infrastructure**
+- **Evolution without erasure**
+
+It is intentionally boring — and intentionally durable.
+
+---
+
+## Why This Matters
+
+If identity, governance, or AI systems cannot survive:
+- infrastructure collapse
+- platform loss
+- institutional failure
+- time discontinuity
+
+Then they are conveniences, not foundations.
+
+StegID is designed to survive being forgotten — and rediscovered.
+
+---
+
+## In One Sentence
+
+StegID is a continuity-of-truth layer that can be recovered from a single artifact, on a single device, without authority.
