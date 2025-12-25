@@ -70,6 +70,10 @@ class StegTVContinuityAdapter:
         except VerificationError as e:
             return VerifiedReceipt(ok=False, receipt=primary, notes=[], error=e.to_dict())
 
+    # Legacy-friendly alias
+    def verify(self, receipts: ReceiptInput, *, strict: bool = True) -> VerifiedReceipt:
+        return self.verify_receipts(receipts, strict=strict)
+
     def verify_receipt_payload(
         self,
         payload_bytes: Union[bytes, bytearray],
@@ -91,7 +95,13 @@ class StegTVContinuityAdapter:
         """
         out = self.verify_receipts(receipts)
         return json.dumps(
-            {"ok": out.ok, "error": out.error, "receipt_id": out.receipt.get("receipt_id"), "notes": out.notes},
+            {
+                "ok": out.ok,
+                "error": out.error,
+                "receipt_id": out.receipt.get("receipt_id"),
+                "sequence": out.receipt.get("sequence"),
+                "notes": out.notes,
+            },
             separators=(",", ":"),
             sort_keys=True,
         )
