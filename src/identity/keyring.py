@@ -17,6 +17,7 @@ class KeyringStore:
       - revoke_key(key_id)
       - upsert_key(key_id, record_dict)
       - upsert_key(key_id=..., public_key_pem=..., revoked=False, created_at=..., expires_at=...)
+      - upsert_key(key_id=..., public_pem=..., revoked=False, ...)
     """
 
     def __init__(self, redis_url: Optional[str] = None):
@@ -48,6 +49,7 @@ class KeyringStore:
         Accepts:
           - upsert_key(key_id, record_dict)
           - upsert_key(key_id=..., public_key_pem=..., revoked=False, ...)
+          - upsert_key(key_id=..., public_pem=..., revoked=False, ...)
         """
         if len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], dict):
             key_id = args[0]
@@ -61,14 +63,14 @@ class KeyringStore:
             return
 
         key_id = kwargs.get("key_id")
-        public_key_pem = kwargs.get("public_key_pem")
+        public_key_pem = kwargs.get("public_key_pem") or kwargs.get("public_pem")
         revoked = bool(kwargs.get("revoked", False))
 
         if not isinstance(key_id, str) or not key_id:
             raise TypeError("upsert_key requires key_id")
 
         if not isinstance(public_key_pem, str) or not public_key_pem:
-            raise TypeError("upsert_key requires public_key_pem")
+            raise TypeError("upsert_key requires public_key_pem (or public_pem)")
 
         rec = dict(kwargs)
         rec["key_id"] = key_id
