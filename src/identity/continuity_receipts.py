@@ -1,90 +1,74 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Tuple
 
-
-# -------------------------
-# Public error type (RESTORED)
-# -------------------------
 
 class VerificationError(Exception):
+    """Raised when receipt verification fails."""
+
+
+@dataclass(frozen=True)
+class ContinuityReceipt:
+    receipt_id: str
+    payload_hash: str
+    signing_key_id: str
+    issued_at: int
+
+
+def _hash_payload(payload: Any) -> str:
+    try:
+        raw = json.dumps(payload, sort_keys=True).encode("utf-8")
+    except Exception as e:
+        raise VerificationError("payload_invalid") from e
+    return hashlib.sha256(raw).hexdigest()
+
+
+def mint_receipt(
+    *,
+    payload: Any,
+    signing_key_id: str,
+    now_epoch: int | None = None,
+) -> ContinuityReceipt:
     """
-    Raised when receipt verification fails.
-
-    Attributes:
-        code: stable machine-readable reason
-        message: human-readable explanation
+    Minimal v1 receipt minting.
+    No signing. No crypto beyond hashing.
     """
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+    if not signing_key_id:
+        raise VerificationError("key_invalid")
 
+    ts = now_epoch or int(time.time())
+    payload_hash = _hash_payload(payload)
 
-# -------------------------
-# Existing helpers (unchanged semantics)
-# -------------------------
+    receipt_id = f"r:{signing_key_id}:{payload_hash[:12]}:{ts}"
 
-def fingerprint_public_key_pem(public_pem: str) -> str:
-    import hashlib
-    return hashlib.sha256(public_pem.encode("utf-8")).hexdigest()
-
-
-def mint_receipt(*args, **kwargs):
-    raise NotImplementedError("mint_receipt unchanged; implementation elsewhere")
+    return ContinuityReceipt(
+        receipt_id=receipt_id,
+        payload_hash=payload_hash,
+        signing_key_id=signing_key_id,
+        issued_at=ts,
+    )
 
 
 def verify_chain_and_sequence(
-    receipts: Iterable[Dict[str, Any]],
+    receipts: Iterable[ContinuityReceipt],
     *,
-    keyring,
+    keyring: Any,
 ) -> Tuple[bool, List[str]]:
     """
-    Verify receipt chain ordering and key trust.
-
-    keyring is REQUIRED and keyword-only by contract.
+    Minimal chain verification.
+    Ensures receipts are well-formed and keys exist.
     """
-    if keyring is None:
-        raise VerificationError("key_invalid", "Keyring is required")
+    notes: List[str] = []
 
-    # Placeholder minimal logic — real verification already exists elsewhere
-    return True, []
+    for r in receipts:
+        if not isinstance(r, ContinuityReceipt):
+            raise VerificationError("receipt_invalid")
 
+        if not keyring.has_key(r.signing_key_id):
+            raise VerificationError("key_invalid")
 
-# -------------------------
-# Compatibility helper (NEW)
-# -------------------------
-
-def _keyring_add_public_pem(keyring, key_id: str, public_pem: str) -> None:
-    """
-    Best-effort helper so tests don't depend on one exact KeyringStore API.
-    Tries multiple known method names.
-    """
-    candidates = [
-        ("add_public_key_pem", (key_id, public_pem)),
-        ("add_public_key", (key_id, public_pem)),
-        ("put_public_key_pem", (key_id, public_pem)),
-        ("set_public_key", (key_id, public_pem)),
-        ("store_public_key_pem", (key_id, public_pem)),
-    ]
-
-    for name, args in candidates:
-        fn = getattr(keyring, name, None)
-        if callable(fn):
-            fn(*args)
-            return
-
-    # Fallback: upsert by positional args only
-    fn = getattr(keyring, "upsert_key", None)
-    if callable(fn):
-        try:
-            fn(key_id, public_pem)
-            return
-        except TypeError:
-            pass
-
-    raise VerificationError(
-        "key_invalid",
-        "Keyring does not support public key insertion"
-    )
+    return True, notes
