@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, TypedDict
 
 from .keyring import KeyringStore
 
@@ -16,6 +16,31 @@ try:
     )
 except Exception as e:  # pragma: no cover
     raise RuntimeError("cryptography is required for StegID v1") from e
+
+
+# -----------------------------
+# Public receipt “model” names (v1 frozen surface)
+# -----------------------------
+class ContinuityReceipt(TypedDict, total=False):
+    contract_version: str
+    signature_alg: str
+
+    receipt_id: str
+    account_id: str
+    sequence: int
+    issued_at: int
+
+    event_type: str
+    event_metadata: Dict[str, Any]
+    payload: Dict[str, Any]
+
+    prev_receipt_id: Optional[str]
+    signing_key_id: str
+    signature_b64: str
+
+
+# alias preserved for v1 surface
+ContinuityReceiptV1 = ContinuityReceipt
 
 
 # -----------------------------
@@ -84,9 +109,6 @@ def _require(d: Dict[str, Any], key: str) -> Any:
     return d[key]
 
 
-# -----------------------------
-# Receipt core (v1)
-# -----------------------------
 def _receipt_core_for_signing(receipt: Dict[str, Any]) -> Dict[str, Any]:
     """
     v1 signing core: stable fields only.
@@ -105,6 +127,9 @@ def _receipt_core_for_signing(receipt: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# -----------------------------
+# Mint + verify (v1 contract)
+# -----------------------------
 def mint_receipt(
     *,
     account_id: str,
@@ -117,16 +142,14 @@ def mint_receipt(
     receipt_id: str,
     signing_key_id: str,
     ed25519_private_pem: str,
-) -> Dict[str, Any]:
+) -> ContinuityReceipt:
     """
     v1 contract minting function (shape required by tests).
     Returns a JSON-serializable dict.
     """
     prev_receipt_id = None
-    if prev_receipt is not None:
-        # tolerate both dict and already-signed shapes
-        if isinstance(prev_receipt, dict) and "receipt_id" in prev_receipt:
-            prev_receipt_id = prev_receipt["receipt_id"]
+    if prev_receipt is not None and isinstance(prev_receipt, dict):
+        prev_receipt_id = prev_receipt.get("receipt_id")
 
     receipt: Dict[str, Any] = {
         "contract_version": "v1",
@@ -149,7 +172,7 @@ def mint_receipt(
     sig = priv.sign(core_bytes)
 
     receipt["signature_b64"] = _b64e(sig)
-    return receipt
+    return receipt  # type: ignore[return-value]
 
 
 def _verify_single_receipt(
@@ -157,11 +180,6 @@ def _verify_single_receipt(
     *,
     keyring: KeyringStore,
 ) -> Dict[str, Any]:
-    """
-    Verify fields + signature. Returns notes dict on success.
-    Raises VerificationError on failure.
-    """
-    # Required v1 fields (minimum needed for deterministic verification)
     _require(r, "receipt_id")
     _require(r, "signing_key_id")
     _require(r, "issued_at")
@@ -202,8 +220,7 @@ def verify_chain_and_sequence(
 ) -> Tuple[bool, List[Dict[str, Any]]]:
     """
     v1 contract:
-      - returns (ok, notes_list)
-      - notes_list is a list (tests assert list)
+      - returns (ok, notes_list) where notes_list is a list
       - strict sequence increments by 1 (when multiple receipts)
       - prev_receipt_id links (when provided)
       - per-receipt signature verified
@@ -221,14 +238,11 @@ def verify_chain_and_sequence(
 
         n = _verify_single_receipt(r, keyring=keyring)
 
-        # Link check (if present)
         if i > 0:
-            # Sequence must increment by 1
             seq = int(r.get("sequence"))
             if prev_seq is not None and seq != prev_seq + 1:
                 raise VerificationError("chain_invalid", "sequence not monotonic +1")
 
-            # prev_receipt_id must match previous receipt_id if provided
             pri = r.get("prev_receipt_id")
             if pri is not None and prev_id is not None and pri != prev_id:
                 raise VerificationError("chain_invalid", "prev_receipt_id mismatch")
@@ -240,7 +254,6 @@ def verify_chain_and_sequence(
     return True, notes
 
 
-# Back-compat alias some code may use
 def verify_receipt_chain(
     receipts: Sequence[Dict[str, Any]],
     *,
