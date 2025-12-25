@@ -26,26 +26,27 @@ def _parse_payload(payload_bytes: Union[bytes, bytearray]) -> Any:
 
 def _extract_chain(obj: Any) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Accepts contract shapes:
-      - single receipt object  -> { ... }
-      - {"receipts": [ ... ]}  -> receipts list
-      - {"receipt_chain": [ ... ]} -> chain list
+    Accepted shapes (v1):
+      - single receipt object             -> { ... }
+      - {"receipts": [ ... ]}             -> list
+      - {"receipt_chain": [ ... ]}        -> list
     Returns (chain_list, primary_receipt)
     """
     if isinstance(obj, dict) and ("receipts" in obj or "receipt_chain" in obj):
         chain = obj.get("receipts")
         if chain is None:
             chain = obj.get("receipt_chain")
+
         if not isinstance(chain, list):
             raise VerificationError("payload_invalid", "receipt chain must be an array")
         if not chain:
             raise VerificationError("payload_invalid", "empty receipt array")
-        if not isinstance(chain[0], dict):
+        if not all(isinstance(x, dict) for x in chain):
             raise VerificationError("payload_invalid", "receipt objects required")
+
         return chain, chain[0]
 
     if isinstance(obj, dict):
-        # single receipt object
         return [obj], obj
 
     raise VerificationError("payload_invalid", "payload must be an object")
@@ -55,7 +56,7 @@ def verify_receipt_payload_bytes(
     payload_bytes: Union[bytes, bytearray],
     *,
     keyring: KeyringStore,
-    now_epoch: Optional[int] = None,  # accepted by contract; v1 doesn’t require time checks yet
+    now_epoch: Optional[int] = None,  # accepted by contract; not enforced in v1 yet
 ) -> VerifiedReceipt:
     obj = _parse_payload(payload_bytes)
     chain, primary = _extract_chain(obj)
@@ -64,4 +65,5 @@ def verify_receipt_payload_bytes(
         ok, notes = verify_chain_and_sequence(tuple(chain), keyring=keyring)
         return VerifiedReceipt(ok=bool(ok), receipt=primary, notes=notes, error=None)
     except VerificationError as e:
-        return VerifiedReceipt(ok=False, receipt=primary if isinstance(primary, dict) else {}, notes=[], error=e.to_dict())
+        # primary is always a dict here (by _extract_chain contract)
+        return VerifiedReceipt(ok=False, receipt=primary, notes=[], error=e.to_dict())
