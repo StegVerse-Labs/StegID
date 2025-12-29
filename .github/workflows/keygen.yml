@@ -25,12 +25,12 @@ jobs:
           ls -la
           pip install -e .
 
-      - name: Verify steg_id is importable
+      - name: Verify stegid is importable
         run: |
           python - << 'EOF'
-          import steg_id
-          print("steg_id import OK:", steg_id)
-          from steg_id.receipts import generate_keypair
+          import stegid
+          print("stegid import OK:", stegid)
+          from stegid.receipts import generate_keypair
           print("generate_keypair import OK")
           EOF
 
