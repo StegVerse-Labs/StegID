@@ -21,3 +21,11 @@ jobs:
       - name: Generate Ed25519 keypair
         run: |
           python tools/keygen_ed25519.py
+
+      - name: Install StegID package
+        run: |
+          pip install -e .
+
+      - name: Generate Ed25519 keypair
+        run: |
+          python tools/keygen_ed25519.py
