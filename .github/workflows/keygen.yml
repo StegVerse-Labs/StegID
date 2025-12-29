@@ -1,0 +1,23 @@
+name: StegID Keygen (one-time)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  keygen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install cryptography
+
+      - name: Generate Ed25519 keypair
+        run: |
+          python tools/keygen_ed25519.py
