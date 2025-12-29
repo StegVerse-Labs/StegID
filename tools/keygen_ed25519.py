@@ -1,5 +1,4 @@
-from __future__ import annotations
-from steg_id.receipts import generate_keypair
+from stegid.receipts import generate_keypair
 
 if __name__ == "__main__":
     priv_b64, pub_b64 = generate_keypair()
