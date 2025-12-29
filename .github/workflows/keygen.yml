@@ -6,25 +6,33 @@ on:
 jobs:
   keygen:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
-        run: |
-          pip install cryptography
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
 
-      - name: Generate Ed25519 keypair
+      - name: Install StegID package (editable)
         run: |
-          python tools/keygen_ed25519.py
-
-      - name: Install StegID package
-        run: |
+          pwd
+          ls -la
           pip install -e .
+
+      - name: Verify steg_id is importable
+        run: |
+          python - << 'EOF'
+          import steg_id
+          print("steg_id import OK:", steg_id)
+          from steg_id.receipts import generate_keypair
+          print("generate_keypair import OK")
+          EOF
 
       - name: Generate Ed25519 keypair
         run: |
