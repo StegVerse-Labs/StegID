@@ -8,7 +8,7 @@ This bundle adds a minimal **receipt minting + verification** layer for StegVers
 
 ## What you get
 - `tools/keygen_ed25519.py` — generate an Ed25519 keypair (private for GitHub Secrets, public for repo)
-- `src/steg_id/receipts.py` — mint + verify receipts
+- `src/stegid/receipts.py` — mint + verify receipts
 - `tools/mint_receipt.py` — CLI mint (prints JSON)
 - `tools/verify_receipt.py` — CLI verify
 - `public_keys/keys.json` — kid->public key mapping (replace placeholder)
